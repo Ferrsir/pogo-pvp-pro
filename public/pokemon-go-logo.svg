@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Pokémon GO Poké Ball badge</title>
+  <desc id="desc">A transparent circular navy, silver, blue, red, and white Pokémon GO-style Poké Ball badge.</desc>
+  <defs>
+    <clipPath id="field-clip">
+      <circle cx="256" cy="256" r="210" />
+    </clipPath>
+    <clipPath id="center-ball-clip">
+      <circle cx="256" cy="256" r="84" />
+    </clipPath>
+  </defs>
+
+  <circle cx="256" cy="256" r="240" fill="#082b53" />
+  <circle cx="256" cy="256" r="226" fill="#d3d6d8" />
+  <circle cx="256" cy="256" r="210" fill="#0b315d" />
+
+  <g clip-path="url(#field-clip)">
+    <path d="M20 292 Q256 236 492 292 L512 512 H0 Z" fill="#0d477f" />
+    <path d="M18 284 Q256 228 494 284" fill="none" stroke="#76d2ff" stroke-width="15" />
+  </g>
+
+  <circle cx="256" cy="256" r="112" fill="#d1d3d4" />
+  <circle cx="256" cy="256" r="98" fill="#082b53" />
+
+  <g clip-path="url(#center-ball-clip)">
+    <circle cx="256" cy="256" r="84" fill="#f8f9fa" />
+    <path d="M172 256 A84 84 0 0 1 340 256 Z" fill="#ed0033" />
+    <rect x="166" y="249" width="180" height="14" fill="#082b53" />
+  </g>
+
+  <circle cx="256" cy="256" r="39" fill="#082b53" />
+  <circle cx="256" cy="256" r="24" fill="#ffffff" />
+</svg>
