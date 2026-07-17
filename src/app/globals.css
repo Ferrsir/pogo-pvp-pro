@@ -1614,6 +1614,21 @@ button:disabled {
   gap: 12px;
 }
 
+.detail-edit-button {
+  background: rgba(73, 167, 255, 0.11);
+  border-color: rgba(73, 167, 255, 0.28);
+  color: #a8d6ff;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.detail-edit-button:hover,
+.detail-edit-button.active {
+  background: rgba(243, 169, 77, 0.11);
+  border-color: rgba(243, 169, 77, 0.3);
+  color: #f0bb76;
+}
+
 .detail-ready-pill {
   align-items: center;
   border: 1px solid rgba(243, 169, 77, 0.25);
@@ -1728,6 +1743,140 @@ button:disabled {
   gap: 13px;
   overflow-y: auto;
   padding: 18px 24px 24px;
+}
+
+.detail-editor-card {
+  background: linear-gradient(145deg, rgba(18, 39, 59, 0.96), rgba(9, 22, 35, 0.97));
+  border: 1px solid rgba(73, 167, 255, 0.32);
+  border-radius: 13px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  padding: 16px;
+}
+
+.detail-editor-heading,
+.detail-editor-footer,
+.detail-editor-actions,
+.cp-advisory {
+  align-items: center;
+  display: flex;
+}
+
+.detail-editor-heading {
+  justify-content: space-between;
+}
+
+.detail-editor-heading > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-editor-heading span,
+.detail-editor-grid label > span,
+.cp-advisory > span {
+  color: #6490ba;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.detail-editor-heading h3 {
+  font-size: 15px;
+  margin: 5px 0 0;
+}
+
+.detail-editor-heading small {
+  color: #74879b;
+  font-size: 8px;
+}
+
+.detail-editor-grid {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 100px 110px repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.detail-editor-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-editor-grid input,
+.detail-editor-grid select {
+  background: #08131f;
+  border: 1px solid rgba(141, 174, 208, 0.18);
+  border-radius: 8px;
+  color: #dce9f7;
+  font: inherit;
+  font-size: 10px;
+  min-height: 38px;
+  outline: none;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.detail-editor-grid input:focus,
+.detail-editor-grid select:focus {
+  border-color: rgba(73, 167, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(73, 167, 255, 0.09);
+}
+
+.detail-editor-footer {
+  border-top: 1px solid var(--line);
+  gap: 14px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 13px;
+}
+
+.cp-advisory {
+  gap: 8px;
+}
+
+.cp-advisory strong {
+  color: var(--green);
+  font-size: 15px;
+}
+
+.cp-advisory small {
+  color: #728599;
+  font-size: 8px;
+}
+
+.cp-advisory.mismatch strong {
+  color: var(--orange);
+}
+
+.cp-advisory button {
+  background: transparent;
+  border: 0;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 850;
+  padding: 4px;
+}
+
+.detail-editor-actions {
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.detail-editor-actions > p {
+  color: #f08f99;
+  font-size: 8px;
+  margin: 0 4px 0 0;
+}
+
+.detail-editor-actions > p span {
+  font-weight: 900;
+  margin-right: 5px;
+}
+
+.detail-editor-actions .button {
+  min-height: 34px;
 }
 
 .detail-stat-grid {
@@ -3887,11 +4036,22 @@ button:disabled {
   .detail-identity .pokemon-mark { height: 54px; width: 54px; }
   .detail-identity h2 { font-size: 21px; }
   .detail-ready-pill { display: none; }
+  .detail-hero-actions { gap: 6px; }
+  .detail-edit-button { font-size: 8px; min-height: 34px; padding: 0 9px; }
   .detail-league-bar { gap: 10px; grid-template-columns: 1fr; padding: 11px 16px; }
   .detail-league-bar > div:first-child, .detail-league-bar > a { display: none; }
   .detail-league-tabs { max-width: none; }
   .detail-league-tabs button { flex-direction: column; justify-content: center; padding: 5px; }
   .detail-scroll { padding: 13px 14px 24px; }
+  .detail-editor-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .detail-editor-grid { grid-template-columns: 1fr 1fr; }
+  .detail-editor-grid label:nth-child(n + 3) { grid-column: 1 / -1; }
+  .detail-editor-footer { align-items: stretch; flex-direction: column; }
+  .cp-advisory { align-items: baseline; flex-wrap: wrap; }
+  .cp-advisory small { flex-basis: 100%; }
+  .detail-editor-actions { flex-wrap: wrap; width: 100%; }
+  .detail-editor-actions > p { flex-basis: 100%; }
+  .detail-editor-actions .button { flex: 1; }
   .detail-stat-grid { grid-template-columns: 1fr 1fr; }
   .detail-stat-grid article { min-height: 82px; padding: 12px; }
   .detail-stat-grid strong { font-size: 17px; }

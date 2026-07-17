@@ -10,6 +10,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Command Center with roster health and league readiness
 - Searchable Great, Ultra, and Master League collection view
 - Click any roster entry to open a complete PvP battle file
+- Edit a saved Pokémon's CP, level, fast move, and charged moves from its collection battle file
 - Current PvPoke Open League rank, score, recommended moves, matchups, counters, and editor notes
 - Exact PvP IV rank across all 4,096 spreads with target CP, target level, and remaining power-ups
 - Type weaknesses, resistances, target battle stats, and the complete legal move pool

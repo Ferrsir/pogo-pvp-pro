@@ -15,6 +15,7 @@ import pvpokeCatalog from "@/data/pvpoke-catalog.json";
 import pokeapiSprites from "@/data/pokeapi-sprites.json";
 import {
   calculateBattleStatsAtLevel,
+  calculatePokemonCpAtLevel,
   findHighestLevelForCap,
   inferPokemonLevel,
   scanAppraisalImage,
@@ -58,6 +59,14 @@ type Pokemon = {
   shadow?: boolean;
   elite?: boolean;
   owned?: boolean;
+};
+
+type PokemonBuildDraft = {
+  cp: number;
+  level: number;
+  fastMove: string;
+  chargedMove1: string;
+  chargedMove2: string;
 };
 
 type ImportItem = {
@@ -274,6 +283,14 @@ function catalogPokemonForRoster(pokemon: Pokemon) {
     const parts = pokemonNameParts(candidate.name);
     return parts.species === pokemon.species && (formParts.length === 0 ? parts.form === "Normal" : parts.form === pokemon.form);
   }) ?? PVP_POKEMON.find((candidate) => candidate.name === pokemon.species) ?? null;
+}
+
+function createPokemonBuildDraft(pokemon: Pokemon, catalogPokemon: PvpPokemon | null): PokemonBuildDraft {
+  const fastMove = catalogPokemon?.fastMoves.includes(pokemon.fastMove) ? pokemon.fastMove : catalogPokemon?.fastMoves[0] ?? pokemon.fastMove;
+  const chargedMove1 = catalogPokemon?.chargedMoves.includes(pokemon.chargedMoves[0]) ? pokemon.chargedMoves[0] : catalogPokemon?.chargedMoves[0] ?? pokemon.chargedMoves[0] ?? "";
+  const currentSecondMove = pokemon.chargedMoves[1];
+  const chargedMove2 = currentSecondMove && currentSecondMove !== "Not unlocked" && catalogPokemon?.chargedMoves.includes(currentSecondMove) && currentSecondMove !== chargedMove1 ? currentSecondMove : "";
+  return { cp: pokemon.cp, level: pokemon.level, fastMove, chargedMove1, chargedMove2 };
 }
 
 function pokemonArtwork(pokemon: Pokemon) {
@@ -1010,6 +1027,11 @@ function App() {
     setCollection((current) => current.map((pokemon) => (pokemon.id === id ? { ...pokemon, favorite: !pokemon.favorite } : pokemon)));
   }
 
+  function updatePokemonBuild(updatedPokemon: Pokemon) {
+    setCollection((current) => current.map((pokemon) => (pokemon.id === updatedPokemon.id ? updatedPokemon : pokemon)));
+    setToast(`${updatedPokemon.species} build updated.`);
+  }
+
   function removePokemon(id: string) {
     const pokemon = collection.find((item) => item.id === id);
     if (!pokemon || !window.confirm(`Remove ${pokemon.species} from your collection?`)) return;
@@ -1237,7 +1259,7 @@ function App() {
         </div>
       </main>
       {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
-      {selectedPokemon && <PokemonDetailDrawer pokemon={selectedPokemon} onClose={() => setSelectedPokemonId(null)} />}
+      {selectedPokemon && <PokemonDetailDrawer pokemon={selectedPokemon} onSave={updatePokemonBuild} onClose={() => setSelectedPokemonId(null)} />}
     </div>
   );
 }
@@ -1360,7 +1382,7 @@ function CollectionView({
   return (
     <section className="panel collection-panel">
       <div className="collection-head">
-        <div><span className="section-eyebrow">ROSTER DATABASE</span><h2>{collection.length} Pokémon in view</h2><p>Search, compare, and track build readiness across every league.</p></div>
+        <div><span className="section-eyebrow">ROSTER DATABASE</span><h2>{collection.length} Pokémon in view</h2><p>Click any Pokémon to review its battle file or edit its CP, level, and moves.</p></div>
         <button className="button primary" onClick={onImport}>＋ Import appraisals</button>
       </div>
       <div className="collection-toolbar">
@@ -1401,11 +1423,14 @@ function CollectionView({
   );
 }
 
-function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: () => void }) {
+function PokemonDetailDrawer({ pokemon, onSave, onClose }: { pokemon: Pokemon; onSave: (pokemon: Pokemon) => void; onClose: () => void }) {
   const [detailLeague, setDetailLeague] = useState<League>(pokemon.cp <= 1500 ? "GL" : pokemon.cp <= 2500 ? "UL" : "ML");
   const [rankings, setRankings] = useState<PvpRankingsData | null>(null);
   const [rankingsError, setRankingsError] = useState(false);
   const catalogPokemon = useMemo(() => catalogPokemonForRoster(pokemon), [pokemon]);
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [draft, setDraft] = useState<PokemonBuildDraft>(() => createPokemonBuildDraft(pokemon, catalogPokemon));
 
   useEffect(() => {
     let active = true;
@@ -1449,6 +1474,7 @@ function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: 
   const ivPercent = Math.round(((pokemon.attackIv + pokemon.defenseIv + pokemon.hpIv) / 45) * 100);
   const sourceDate = rankings ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(rankings.source.sourceUpdatedAt)) : "";
   const pvpokeUrl = catalogPokemon ? `https://pvpoke.com/rankings/all/${leagueCpCap}/overall/${catalogPokemon.id}/` : "https://pvpoke.com/rankings/";
+  const calculatedDraftCp = catalogPokemon ? calculatePokemonCpAtLevel(catalogPokemon.baseStats, pokemon.attackIv, pokemon.defenseIv, pokemon.hpIv, draft.level) : 0;
 
   const upgradeSteps: Array<{ tone: string; title: string; detail: string }> = [];
   if (pokemon.cp > leagueCpCap) {
@@ -1470,6 +1496,62 @@ function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: 
     return PVP_POKEMON_BY_ID.get(id)?.name ?? id.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
+  function beginEdit() {
+    setDraft(createPokemonBuildDraft(pokemon, catalogPokemon));
+    setEditError("");
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setDraft(createPokemonBuildDraft(pokemon, catalogPokemon));
+    setEditError("");
+    setEditing(false);
+  }
+
+  function saveBuild(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!catalogPokemon) {
+      setEditError("This roster entry needs a catalog match before its moves can be edited.");
+      return;
+    }
+    if (!Number.isInteger(draft.cp) || draft.cp < 10 || draft.cp > 10000) {
+      setEditError("CP must be a whole number from 10 to 10,000.");
+      return;
+    }
+    if (draft.level < 1 || draft.level > 51 || Math.abs(draft.level * 2 - Math.round(draft.level * 2)) > 0.001) {
+      setEditError("Pokémon level must be from 1 to 51 in 0.5 increments.");
+      return;
+    }
+    if (!catalogPokemon.fastMoves.includes(draft.fastMove) || !catalogPokemon.chargedMoves.includes(draft.chargedMove1) || (draft.chargedMove2 && !catalogPokemon.chargedMoves.includes(draft.chargedMove2))) {
+      setEditError("Choose moves from this form's legal move pool.");
+      return;
+    }
+    if (draft.chargedMove2 && draft.chargedMove1 === draft.chargedMove2) {
+      setEditError("The two charged-move slots must use different moves.");
+      return;
+    }
+
+    const chargedMoves = [draft.chargedMove1, draft.chargedMove2 || "Not unlocked"];
+    const equippedMoves = [draft.fastMove, ...chargedMoves];
+    const nextLeague: League = draft.cp <= 1500 ? "GL" : draft.cp <= 2500 ? "UL" : "ML";
+    const recommendedReady = pokemon.recommendedMoves.length
+      ? pokemon.recommendedMoves.every((move) => equippedMoves.includes(move)) && Boolean(draft.chargedMove2)
+      : pokemon.ready && Boolean(draft.chargedMove2);
+    onSave({
+      ...pokemon,
+      cp: draft.cp,
+      level: draft.level,
+      fastMove: draft.fastMove,
+      chargedMoves,
+      leagues: [nextLeague],
+      ready: recommendedReady,
+      elite: equippedMoves.some((move) => catalogPokemon.eliteMoves.includes(move)),
+    });
+    setDetailLeague(nextLeague);
+    setEditError("");
+    setEditing(false);
+  }
+
   return (
     <div className="pokemon-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="pokemon-detail-drawer" role="dialog" aria-modal="true" aria-label={`${pokemon.species} battle details`}>
@@ -1478,7 +1560,7 @@ function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: 
             <PokemonMark pokemon={pokemon} />
             <div><span className="section-eyebrow">POKÉMON BATTLE FILE</span><h2>{pokemon.species}</h2><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Level {pokemon.level}</p><TypeList types={catalogPokemon?.types ?? pokemon.types} /></div>
           </div>
-          <div className="detail-hero-actions"><span className={`detail-ready-pill ${buildReady ? "ready" : "needs-work"}`}><i />{buildReady ? `${LEAGUES[detailLeague].name} ready` : "Upgrades recommended"}</span><button className="detail-close" autoFocus onClick={onClose} aria-label="Close Pokémon details">×</button></div>
+          <div className="detail-hero-actions"><span className={`detail-ready-pill ${buildReady ? "ready" : "needs-work"}`}><i />{buildReady ? `${LEAGUES[detailLeague].name} ready` : "Upgrades recommended"}</span>{catalogPokemon && <button className={`button detail-edit-button ${editing ? "active" : ""}`} onClick={editing ? cancelEdit : beginEdit}>{editing ? "Cancel edit" : "✎ Edit build"}</button>}<button className="detail-close" autoFocus={!editing} onClick={onClose} aria-label="Close Pokémon details">×</button></div>
         </header>
 
         <div className="detail-league-bar">
@@ -1491,6 +1573,20 @@ function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: 
           <div className="detail-loading">This older roster entry is missing a catalog match. Re-import its appraisal to unlock the full battle file.</div>
         ) : (
           <div className="detail-scroll">
+            {editing && catalogPokemon && <form className="detail-editor-card" onSubmit={saveBuild}>
+              <div className="detail-editor-heading"><div><span>EDIT SAVED BUILD</span><h3>Update CP, level, and equipped moves</h3></div><small>Only legal moves for {catalogPokemon.name} are available.</small></div>
+              <div className="detail-editor-grid">
+                <label><span>Current CP</span><input autoFocus type="number" min={10} max={10000} step={1} value={draft.cp} onChange={(event) => setDraft((current) => ({ ...current, cp: Number(event.target.value) }))} /></label>
+                <label><span>Pokémon level</span><input type="number" min={1} max={51} step={0.5} value={draft.level} onChange={(event) => setDraft((current) => ({ ...current, level: Number(event.target.value) }))} /></label>
+                <label><span>Fast move</span><select value={draft.fastMove} onChange={(event) => setDraft((current) => ({ ...current, fastMove: event.target.value }))}>{catalogPokemon.fastMoves.map((move) => <option key={move} value={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label>
+                <label><span>Charged move 1</span><select value={draft.chargedMove1} onChange={(event) => setDraft((current) => ({ ...current, chargedMove1: event.target.value, chargedMove2: current.chargedMove2 === event.target.value ? "" : current.chargedMove2 }))}>{catalogPokemon.chargedMoves.map((move) => <option key={move} value={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label>
+                <label><span>Charged move 2</span><select value={draft.chargedMove2} onChange={(event) => setDraft((current) => ({ ...current, chargedMove2: event.target.value }))}><option value="">Not unlocked</option>{catalogPokemon.chargedMoves.map((move) => <option key={move} value={move} disabled={move === draft.chargedMove1}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label>
+              </div>
+              <div className="detail-editor-footer">
+                <div className={calculatedDraftCp && calculatedDraftCp !== draft.cp ? "cp-advisory mismatch" : "cp-advisory"}><span>CALCULATED CP</span><strong>{calculatedDraftCp ? calculatedDraftCp.toLocaleString() : "—"}</strong><small>at level {draft.level} with {pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv} IVs</small>{calculatedDraftCp > 0 && calculatedDraftCp !== draft.cp && <button type="button" onClick={() => setDraft((current) => ({ ...current, cp: calculatedDraftCp }))}>Use calculated CP</button>}</div>
+                <div className="detail-editor-actions">{editError && <p role="alert"><span>!</span>{editError}</p>}<button type="button" className="button ghost" onClick={cancelEdit}>Cancel</button><button type="submit" className="button primary">Save build</button></div>
+              </div>
+            </form>}
             <section className="detail-stat-grid">
               <article><span>PVPOKE META RANK</span><strong>{ranking ? `#${ranking.rank}` : "Unranked"}</strong><small>{ranking ? `${ranking.score.toFixed(1)} overall score` : `No Open ${detailLeague} simulation`}</small></article>
               <article><span>YOUR PVP IV RANK</span><strong>{ivAnalysis ? `#${ivAnalysis.rank}` : "—"}</strong><small>{ivAnalysis ? `Top ${ivAnalysis.topPercent.toFixed(ivAnalysis.topPercent < 10 ? 1 : 0)}% of 4,096 spreads` : "Calculating"}</small></article>
@@ -1929,7 +2025,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.7 · Pokémon artwork</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.8 · Roster editing</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
     </div>
   );
 }
