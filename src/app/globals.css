@@ -2124,6 +2124,57 @@ button:disabled {
   margin: 7px 0 0;
 }
 
+.builder-toolbar-copy {
+  max-width: 520px;
+}
+
+.builder-toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.builder-mode-switch {
+  background: #08111c;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  padding: 3px;
+}
+
+.builder-mode-switch button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #7b8da2;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font-size: 9px;
+  font-weight: 720;
+  gap: 2px;
+  min-width: 112px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.builder-mode-switch button span {
+  color: #53667b;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.builder-mode-switch button.active {
+  background: #14283d;
+  border-color: rgba(73, 167, 255, 0.3);
+  color: #e8f5ff;
+}
+
+.builder-mode-switch button.active span {
+  color: var(--blue);
+}
+
 .builder-layout {
   align-items: start;
   display: grid;
@@ -2228,6 +2279,64 @@ button:disabled {
   margin-top: 20px;
 }
 
+.manual-builder-note {
+  background: linear-gradient(145deg, rgba(73, 167, 255, 0.1), rgba(78, 212, 160, 0.045));
+  border: 1px solid rgba(73, 167, 255, 0.2);
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  margin-top: 17px;
+  padding: 15px;
+}
+
+.manual-builder-note > span {
+  color: var(--blue);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.manual-builder-note strong {
+  font-size: 15px;
+  margin-top: 7px;
+}
+
+.manual-builder-note strong b {
+  color: var(--green);
+  font-size: 22px;
+}
+
+.manual-builder-note p {
+  color: #75879a;
+  font-size: 10px;
+  line-height: 1.55;
+  margin: 9px 0 0;
+}
+
+.manual-builder-steps {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 12px;
+}
+
+.manual-builder-steps > div {
+  align-items: center;
+  background: #09131f;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #607185;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 3px;
+}
+
+.manual-builder-steps b { font-size: 13px; }
+.manual-builder-steps span { font-size: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; text-align: center; }
+.manual-builder-steps > div.done { background: rgba(78, 212, 160, 0.07); border-color: rgba(78, 212, 160, 0.25); color: var(--green); }
+
 .builder-main {
   display: flex;
   flex-direction: column;
@@ -2303,6 +2412,69 @@ button:disabled {
 .member-card-top button.locked {
   color: #72c0ff;
 }
+
+.member-card.manual {
+  border-color: rgba(73, 167, 255, 0.25);
+}
+
+.member-card-top button.remove {
+  color: #f2a65b;
+}
+
+.manual-team-slot {
+  align-items: center;
+  background: repeating-linear-gradient(135deg, rgba(73, 167, 255, 0.025) 0 8px, transparent 8px 16px), #09131f;
+  border: 1px dashed rgba(104, 139, 176, 0.3);
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 360px;
+  padding: 22px;
+  position: relative;
+  text-align: center;
+}
+
+.manual-team-slot > span {
+  color: #4e6074;
+  font-size: 9px;
+  font-weight: 900;
+  left: 14px;
+  letter-spacing: 0.12em;
+  position: absolute;
+  top: 14px;
+}
+
+.manual-team-slot > i {
+  align-items: center;
+  background: rgba(73, 167, 255, 0.08);
+  border: 1px solid rgba(73, 167, 255, 0.22);
+  border-radius: 50%;
+  color: var(--blue);
+  display: flex;
+  font-size: 22px;
+  font-style: normal;
+  height: 54px;
+  justify-content: center;
+  width: 54px;
+}
+
+.manual-team-slot strong { font-size: 14px; margin-top: 15px; }
+.manual-team-slot p { color: #627489; font-size: 9px; line-height: 1.45; margin: 6px 0 0; }
+
+.manual-lineup-progress {
+  align-items: center;
+  background: rgba(73, 167, 255, 0.055);
+  border: 1px solid rgba(73, 167, 255, 0.14);
+  border-radius: 10px;
+  display: flex;
+  gap: 11px;
+  margin-top: 14px;
+  padding: 11px 13px;
+}
+
+.manual-lineup-progress span { color: var(--blue); font-size: 13px; font-weight: 900; }
+.manual-lineup-progress p { color: #8496aa; font-size: 10px; margin: 0; }
 
 .member-card > h3 {
   font-size: 16px;
@@ -2527,11 +2699,14 @@ button:disabled {
 
 .candidate-card:hover { border-color: rgba(73, 167, 255, 0.28); }
 .candidate-card.locked { background: rgba(73, 167, 255, 0.08); border-color: rgba(73, 167, 255, 0.35); }
+.candidate-card.selected { background: rgba(78, 212, 160, 0.08); border-color: rgba(78, 212, 160, 0.38); }
+.candidate-card:disabled { cursor: not-allowed; opacity: 0.38; }
 .candidate-card > div:nth-child(2) { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .candidate-card strong { font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .candidate-card span { color: #637388; font-size: 7px; margin-top: 4px; }
 .candidate-card > i { color: #627287; font-size: 6px; font-style: normal; font-weight: 900; }
 .candidate-card.locked > i { color: var(--blue); }
+.candidate-card.selected > i { color: var(--green); }
 
 .import-hero {
   align-items: center;
@@ -2744,6 +2919,13 @@ button:disabled {
 
 .low-confidence {
   color: var(--orange);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.scan-summary-ready {
+  color: var(--green);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -3558,6 +3740,7 @@ button:disabled {
   .member-card .pokemon-mark { grid-row: 2 / span 4; justify-self: center; }
   .member-card > h3, .member-card > p { margin: 0; }
   .member-card .type-list { justify-content: flex-start; }
+  .manual-team-slot { min-height: 210px; }
   .move-list { margin-top: 4px; }
   .member-meta { grid-column: 1 / -1; }
   .analysis-grid { grid-template-columns: 1fr; }
@@ -3628,6 +3811,9 @@ button:disabled {
   .readiness-ring { margin: 18px auto; }
   .readiness-list { width: 100%; }
   .collection-head, .builder-toolbar, .import-hero { align-items: flex-start; flex-direction: column; gap: 15px; }
+  .builder-toolbar-actions { align-items: stretch; flex-direction: column; width: 100%; }
+  .builder-mode-switch { width: 100%; }
+  .builder-mode-switch button { flex: 1; min-width: 0; }
   .collection-head .button, .import-hero .privacy-chip { width: 100%; }
   .collection-toolbar { align-items: stretch; flex-wrap: wrap; }
   .search-box { max-width: none; width: 100%; }

@@ -218,6 +218,40 @@ function extractCp(text: string) {
   return Number.isInteger(value) && value >= 10 && value <= 10000 ? value : null;
 }
 
+function extractFocusedCp(text: string) {
+  const candidates = text.toUpperCase().replaceAll("O", "0").match(/[0-9]{2,5}/g) ?? [];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isInteger(value) && value >= 10 && value <= 10000) return value;
+  }
+  return null;
+}
+
+async function readFocusedCp(canvas: HTMLCanvasElement) {
+  const worker = await getOcrWorker();
+  const { PSM } = await import("tesseract.js");
+  await worker.setParameters({
+    tessedit_pageseg_mode: PSM.SINGLE_LINE,
+    tessedit_char_whitelist: "CP0123456789",
+  });
+  try {
+    const result = await worker.recognize(canvas, {
+      rectangle: {
+        left: Math.round(canvas.width * 0.18),
+        top: Math.round(canvas.height * 0.035),
+        width: Math.round(canvas.width * 0.62),
+        height: Math.round(canvas.height * 0.08),
+      },
+    });
+    return extractFocusedCp(result.data.text);
+  } finally {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.AUTO,
+      tessedit_char_whitelist: "",
+    });
+  }
+}
+
 export async function scanAppraisalImage(file: File, onProgress: ScanProgress): Promise<AppraisalPixelScan> {
   onProgress(3, "Preparing screenshot");
   const canvas = await loadCanvas(file);
@@ -228,11 +262,16 @@ export async function scanAppraisalImage(file: File, onProgress: ScanProgress): 
   try {
     const worker = await getOcrWorker();
     const result = await worker.recognize(canvas, { rotateAuto: false });
+    let cp = extractCp(result.data.text);
+    if (cp === null) {
+      onProgress(93, "Double-checking CP");
+      cp = await readFocusedCp(canvas);
+    }
     onProgress(96, "Matching Pokémon catalog");
     return {
       text: result.data.text,
       ocrConfidence: result.data.confidence,
-      cp: extractCp(result.data.text),
+      cp,
       attackIv,
       defenseIv,
       hpIv,
