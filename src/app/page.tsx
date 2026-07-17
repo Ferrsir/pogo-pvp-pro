@@ -20,6 +20,7 @@ import {
   inferPokemonLevel,
   scanAppraisalImage,
 } from "@/lib/appraisal-scan";
+import { analyzeTeam, pokemonMetaScore, TeamAnalysis } from "@/lib/team-analysis";
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
@@ -719,23 +720,50 @@ const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "teams", label: "Saved Teams", icon: "▱" },
 ];
 
-const COVERAGE: Record<League, { strengths: string[]; threats: string[]; targets: string[] }> = {
-  GL: {
-    strengths: ["Steel", "Ghost", "Ground", "Rock"],
-    threats: ["Flying", "Psychic", "Grass"],
-    targets: ["Dunsparce", "Azumarill", "Clodsire"],
-  },
-  UL: {
-    strengths: ["Ghost", "Dragon", "Steel", "Fire"],
-    threats: ["Fairy", "Dark", "Water"],
-    targets: ["Giratina", "Cobalion", "Tentacruel"],
-  },
-  ML: {
-    strengths: ["Dragon", "Fairy", "Psychic", "Flying"],
-    threats: ["Ground", "Dark", "Fire"],
-    targets: ["Palkia", "Mewtwo", "Xerneas"],
-  },
-};
+function combinations<T>(values: T[], count: number): T[][] {
+  if (count === 0) return [[]];
+  const output: T[][] = [];
+  function collect(start: number, selected: T[]) {
+    if (selected.length === count) {
+      output.push(selected);
+      return;
+    }
+    for (let index = start; index <= values.length - (count - selected.length); index += 1) {
+      collect(index + 1, [...selected, values[index]]);
+    }
+  }
+  collect(0, []);
+  return output;
+}
+
+function optimizedTeam(
+  candidates: Pokemon[],
+  locked: string[],
+  seed: number,
+  league: League,
+  rankings: PvpRankingsData | null,
+) {
+  const lockedMembers = locked.map((id) => candidates.find((pokemon) => pokemon.id === id)).filter(Boolean) as Pokemon[];
+  const available = candidates
+    .filter((pokemon) => !locked.includes(pokemon.id))
+    .sort((left, right) => pokemonMetaScore(right, rankings, league) - pokemonMetaScore(left, rankings, league));
+  if (!rankings || candidates.length < 3) {
+    const offset = available.length ? seed % available.length : 0;
+    return [...lockedMembers, ...available.slice(offset), ...available.slice(0, offset)].slice(0, 3);
+  }
+  const needed = Math.max(0, 3 - lockedMembers.length);
+  const lineups = combinations(available.slice(0, 20), needed)
+    .map((members) => {
+      const team = [...lockedMembers, ...members];
+      return { team, analysis: analyzeTeam(team, league, rankings) };
+    })
+    .filter((lineup): lineup is { team: Pokemon[]; analysis: TeamAnalysis } => Boolean(lineup.analysis))
+    .sort((left, right) => right.analysis.score - left.analysis.score
+      || right.analysis.metaCoverage - left.analysis.metaCoverage
+      || right.analysis.safety - left.analysis.safety);
+  if (!lineups.length) return [...lockedMembers, ...available].slice(0, 3);
+  return lineups[seed % Math.min(12, lineups.length)].team;
+}
 
 async function fetchTrainerState(): Promise<{ collection: Pokemon[]; savedTeams: SavedTeam[] }> {
   const response = await fetch("/api/state", { cache: "no-store" });
@@ -773,6 +801,7 @@ function App() {
   const [compactMode, setCompactMode] = useState(false);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
+  const [rankingsData, setRankingsData] = useState<PvpRankingsData | null>(null);
   const [accountError, setAccountError] = useState("");
   const [toast, setToast] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -803,6 +832,18 @@ function App() {
       }
     }
     void loadAccount();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    import("@/data/pvpoke-rankings.json")
+      .then((module) => {
+        if (!cancelled) setRankingsData(module.default as PvpRankingsData);
+      })
+      .catch(() => {
+        if (!cancelled) setToast("PvPoke team analysis is temporarily unavailable.");
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -844,20 +885,23 @@ function App() {
       .filter((pokemon) => pokemon.leagues.includes(league))
       .filter((pokemon) => includeShadow || !pokemon.shadow)
       .filter((pokemon) => allowElite || !pokemon.elite)
-      .sort((a, b) => b.rating - a.rating);
-  }, [allowElite, collection, includeShadow, league, ownedOnly]);
+      .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league));
+  }, [allowElite, collection, includeShadow, league, ownedOnly, rankingsData]);
 
   const generatedTeam = useMemo(() => {
-    const lockedMembers = candidates.filter((pokemon) => locked.includes(pokemon.id));
-    const available = candidates.filter((pokemon) => !locked.includes(pokemon.id));
-    const offset = available.length ? teamSeed % available.length : 0;
-    const rotated = [...available.slice(offset), ...available.slice(0, offset)];
-    return [...lockedMembers, ...rotated].slice(0, 3);
-  }, [candidates, locked, teamSeed]);
+    return optimizedTeam(candidates, locked, teamSeed, league, rankingsData);
+  }, [candidates, league, locked, rankingsData, teamSeed]);
+
+  const generatedAnalysis = useMemo(
+    () => analyzeTeam(generatedTeam, league, rankingsData),
+    [generatedTeam, league, rankingsData],
+  );
 
   const manualCandidates = useMemo(
-    () => collection.filter((pokemon) => pokemon.leagues.includes(league)).sort((a, b) => b.rating - a.rating),
-    [collection, league],
+    () => collection
+      .filter((pokemon) => pokemon.leagues.includes(league))
+      .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league)),
+    [collection, league, rankingsData],
   );
 
   const manualTeam = useMemo(
@@ -866,6 +910,10 @@ function App() {
   );
 
   const builderTeam = builderMode === "manual" ? manualTeam : generatedTeam;
+  const builderAnalysis = useMemo(
+    () => analyzeTeam(builderTeam, league, rankingsData),
+    [builderTeam, league, rankingsData],
+  );
 
   const filteredCollection = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -925,12 +973,16 @@ function App() {
       setToast("Add three eligible Pokémon before saving.");
       return;
     }
+    if (!builderAnalysis) {
+      setToast("The live PvPoke analysis is still loading. Try saving again in a moment.");
+      return;
+    }
     const newTeam: SavedTeam = {
       id: crypto.randomUUID(),
       name: `${activeLeague.name} — Custom Lineup`,
       league,
       memberIds: builderTeam.map((pokemon) => pokemon.id),
-      score: Math.round(builderTeam.reduce((sum, pokemon) => sum + pokemon.rating, 0) / builderTeam.length - 2),
+      score: builderAnalysis.score,
       updated: "Just now",
     };
     setSavedTeams((current) => [newTeam, ...current]);
@@ -1230,6 +1282,7 @@ function App() {
               collection={collection}
               league={league}
               team={generatedTeam}
+              analysis={generatedAnalysis}
               readyCount={readyCount}
               leagueReady={leagueReady}
               savedCount={savedTeams.length}
@@ -1258,6 +1311,7 @@ function App() {
               manualCandidates={manualCandidates}
               manualTeamIds={manualTeamIds}
               team={builderTeam}
+              analysis={builderAnalysis}
               locked={locked}
               ownedOnly={ownedOnly}
               includeShadow={includeShadow}
@@ -1292,6 +1346,7 @@ function App() {
             <TeamsView
               teams={savedTeams}
               collection={collection}
+              rankings={rankingsData}
               onOpen={(savedTeam) => {
                 selectLeague(savedTeam.league);
                 setBuilderMode("manual");
@@ -1332,6 +1387,7 @@ function Dashboard({
   collection,
   league,
   team,
+  analysis,
   readyCount,
   leagueReady,
   savedCount,
@@ -1341,17 +1397,16 @@ function Dashboard({
   collection: Pokemon[];
   league: League;
   team: Pokemon[];
+  analysis: TeamAnalysis | null;
   readyCount: number;
   leagueReady: number;
   savedCount: number;
   onLeague: (league: League) => void;
   onNavigate: (view: View) => void;
 }) {
-  const coverage = COVERAGE[league];
   const readyPercent = collection.length ? Math.round((readyCount / collection.length) * 100) : 0;
   const optimizedPercent = collection.length ? Math.round((collection.filter((pokemon) => pokemon.recommendedMoves.length > 0 && pokemon.recommendedMoves.every((move) => [pokemon.fastMove, ...pokemon.chargedMoves].includes(move))).length / collection.length) * 100) : 0;
   const secondMovePercent = collection.length ? Math.round((collection.filter((pokemon) => pokemon.chargedMoves[1] && pokemon.chargedMoves[1] !== "Not unlocked").length / collection.length) * 100) : 0;
-  const teamScore = team.length === 3 ? Math.round(team.reduce((sum, pokemon) => sum + pokemon.rating, 0) / 3 - 2) : 0;
   return (
     <>
       <section className="hero-panel">
@@ -1391,10 +1446,10 @@ function Dashboard({
             ))}
           </div>
           <div className="team-footer">
-            <div className="score-ring" style={{ "--score": String(teamScore) } as React.CSSProperties}><strong>{teamScore}</strong><span>TEAM<br />SCORE</span></div>
+            <div className="score-ring" style={{ "--score": String(analysis?.score ?? 0) } as React.CSSProperties}><strong>{analysis?.score ?? "…"}</strong><span>TEAM<br />SCORE</span></div>
             <div className="coverage-summary">
-              <div><span>Strong into</span><TypeList types={coverage.strengths.slice(0, 3)} /></div>
-              <div><span>Watch for</span><TypeList types={coverage.threats.slice(0, 3)} /></div>
+              <div><span>Strong into</span><TypeList types={analysis?.offense.slice(0, 3).map((row) => row.type) ?? []} /></div>
+              <div><span>Watch for</span><TypeList types={analysis?.threats.slice(0, 3).map((row) => row.type) ?? []} /></div>
             </div>
             <button className="button subtle" onClick={() => onNavigate("builder")}>Tune lineup</button>
           </div></> : <EmptyState icon="＋" title="Your roster is ready for its first entry" text="Import a Pokémon to unlock team recommendations and coverage analysis." action={<button className="button primary" onClick={() => onNavigate("import")}>Add your first Pokémon</button>} />}
@@ -1707,6 +1762,7 @@ function BuilderView({
   manualCandidates,
   manualTeamIds,
   team,
+  analysis,
   locked,
   ownedOnly,
   includeShadow,
@@ -1728,6 +1784,7 @@ function BuilderView({
   manualCandidates: Pokemon[];
   manualTeamIds: string[];
   team: Pokemon[];
+  analysis: TeamAnalysis | null;
   locked: string[];
   ownedOnly: boolean;
   includeShadow: boolean;
@@ -1743,10 +1800,9 @@ function BuilderView({
   onGenerate: () => void;
   onSave: () => void;
 }) {
-  const coverage = COVERAGE[league];
-  const teamScore = team.length === 3 ? Math.round(team.reduce((sum, pokemon) => sum + pokemon.rating, 0) / team.length - 2) : null;
   const roles = ["Lead", "Safe switch", "Closer"];
   const candidatePool = mode === "manual" ? manualCandidates : candidates;
+  const sourceDate = analysis ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(analysis.sourceUpdatedAt)) : "";
   return (
     <>
       <section className="builder-toolbar panel">
@@ -1780,10 +1836,10 @@ function BuilderView({
               <div className="control-divider" />
               <div className="weight-list">
                 <span className="section-eyebrow">SCORING MODEL</span>
-                <MetricBar label="Meta coverage" value={30} max={30} />
-                <MetricBar label="Threat control" value={20} max={30} />
-                <MetricBar label="Team safety" value={15} max={30} />
-                <MetricBar label="Consistency" value={15} max={30} />
+                <MetricBar label="Meta strength · 30%" value={analysis?.metaStrength ?? 0} max={100} />
+                <MetricBar label="Meta coverage · 30%" value={analysis?.metaCoverage ?? 0} max={100} />
+                <MetricBar label="Team safety · 25%" value={analysis?.safety ?? 0} max={100} />
+                <MetricBar label="Build quality · 15%" value={analysis?.buildQuality ?? 0} max={100} />
               </div>
               <button className="button primary wide generate-button" onClick={onGenerate}>↻ Generate another team</button>
             </>
@@ -1794,8 +1850,9 @@ function BuilderView({
           <section className="panel lineup-panel">
             <div className="lineup-heading">
               <div><span className="section-eyebrow">{mode === "manual" ? "YOUR SELECTED TEAM" : "TOP RECOMMENDATION"}</span><h2>{LEAGUES[league].name} lineup</h2></div>
-              <div className="lineup-score"><strong>{teamScore ?? "—"}</strong><span>TEAM<br />SCORE</span></div>
+              <div className="lineup-score"><strong>{analysis?.score ?? "—"}</strong><span>TEAM<br />SCORE</span></div>
             </div>
+            {analysis && <TeamScoreBreakdown analysis={analysis} />}
             {mode === "manual" ? (
               <div className="member-grid manual-member-grid">
                 {roles.map((role, index) => team[index]
@@ -1816,16 +1873,19 @@ function BuilderView({
           <section className="analysis-grid">
             <div className="panel analysis-card">
               <PanelHeader eyebrow="MATCHUP PROFILE" title="Coverage map" />
-              <div className="coverage-columns">
-                <div><span className="analysis-label positive">STRONG INTO</span>{coverage.strengths.map((type) => <CoverageRow key={type} type={type} value={82 - coverage.strengths.indexOf(type) * 7} />)}</div>
-                <div><span className="analysis-label danger">WATCH FOR</span>{coverage.threats.map((type) => <CoverageRow key={type} type={type} value={56 - coverage.threats.indexOf(type) * 6} danger />)}</div>
-              </div>
+              {analysis ? <div className="coverage-columns">
+                <div><span className="analysis-label positive">EQUIPPED MOVE COVERAGE</span>{analysis.offense.map((row) => <CoverageRow key={row.type} {...row} />)}</div>
+                <div><span className="analysis-label danger">DEFENSIVE PRESSURE</span>{analysis.threats.map((row) => <CoverageRow key={row.type} {...row} danger />)}</div>
+              </div> : <div className="analysis-placeholder">{team.length === 3 ? "Loading current PvPoke analysis…" : "Complete a team of three to calculate its coverage."}</div>}
             </div>
             <div className="panel analysis-card targets-card">
               <PanelHeader eyebrow="META CHECK" title="Targets & counters" />
-              <p className="card-intro">This lineup is positioned to handle:</p>
-              <div className="target-list">{coverage.targets.map((target, index) => <div key={target}><span className={`target-rank rank-${index + 1}`}>{index + 1}</span><div><strong>{target}</strong><span>{index === 0 ? "Strong answer" : index === 1 ? "Positive matchup" : "Shield dependent"}</span></div><b>{88 - index * 9}%</b></div>)}</div>
-              <div className="recommendation"><span>↗</span><div><strong>Best next upgrade</strong><p>{team.find((pokemon) => !pokemon.ready)?.species ?? team[1]?.species ?? "Your safe switch"} gains the most from a second charged move.</p></div></div>
+              {analysis ? <>
+                <p className="card-intro">Best answers across the top {analysis.metaSampleSize} Open League Pokémon:</p>
+                <div className="target-list">{analysis.targets.map((target, index) => <div key={target.id}><span className={`target-rank rank-${index + 1}`}>{index + 1}</span><div><strong>{target.name}</strong><span>{target.answerPokemon} · {target.evidence}</span></div><b>{target.rating}%</b></div>)}</div>
+                <div className="recommendation danger-note"><span>!</span><div><strong>Hardest remaining threats</strong><p>{analysis.metaThreats.map((target) => `${target.name} ${target.rating}%`).join(" · ")}</p></div></div>
+                <footer className="analysis-source">PvPoke Open {league} · {sourceDate} · equipped moves <a href={analysis.sourceUrl} target="_blank" rel="noreferrer">Source ↗</a></footer>
+              </> : <div className="analysis-placeholder">Targets will appear after the lineup is complete and rankings finish loading.</div>}
             </div>
           </section>
 
@@ -1960,13 +2020,14 @@ function ImportView({
   );
 }
 
-function TeamsView({ teams, collection, onOpen, onCopy, onDelete, onCreate }: { teams: SavedTeam[]; collection: Pokemon[]; onOpen: (team: SavedTeam) => void; onCopy: (team: SavedTeam) => void; onDelete: (id: string) => void; onCreate: () => void }) {
+function TeamsView({ teams, collection, rankings, onOpen, onCopy, onDelete, onCreate }: { teams: SavedTeam[]; collection: Pokemon[]; rankings: PvpRankingsData | null; onOpen: (team: SavedTeam) => void; onCopy: (team: SavedTeam) => void; onDelete: (id: string) => void; onCreate: () => void }) {
   return (
     <section className="panel saved-teams-panel">
       <div className="collection-head"><div><span className="section-eyebrow">BATTLE PLANS</span><h2>Your saved teams</h2><p>Keep proven lines close and copy a quick reference whenever you need it.</p></div><button className="button primary" onClick={onCreate}>＋ Build a team</button></div>
       {teams.length ? <div className="saved-team-grid">{teams.map((team) => {
         const members = team.memberIds.map((id) => collection.find((pokemon) => pokemon.id === id)).filter(Boolean) as Pokemon[];
-        return <article className="saved-team-card" key={team.id}><div className="saved-card-top"><span className={`league-pill ${team.league.toLowerCase()}`}>{team.league}</span><span>Updated {team.updated}</span></div><h3>{team.name}</h3><div className="saved-members">{members.map((pokemon) => <div key={pokemon.id}><PokemonMark pokemon={pokemon} size="small" /><span>{pokemon.species}</span></div>)}</div><div className="saved-card-footer"><div><strong>{team.score}</strong><span>score</span></div><button className="button ghost" onClick={() => onCopy(team)}>Copy reference</button><button className="button secondary" onClick={() => onOpen(team)}>Open team</button><button className="icon-button" onClick={() => onDelete(team.id)} aria-label={`Delete ${team.name}`}>×</button></div></article>;
+        const analysis = analyzeTeam(members, team.league, rankings);
+        return <article className="saved-team-card" key={team.id}><div className="saved-card-top"><span className={`league-pill ${team.league.toLowerCase()}`}>{team.league}</span><span>Updated {team.updated}</span></div><h3>{team.name}</h3><div className="saved-members">{members.map((pokemon) => <div key={pokemon.id}><PokemonMark pokemon={pokemon} size="small" /><span>{pokemon.species}</span></div>)}</div>{analysis && <div className="saved-analysis"><span>Coverage <b>{analysis.metaCoverage}</b></span><span>Safety <b>{analysis.safety}</b></span><span>Build <b>{analysis.buildQuality}</b></span></div>}<div className="saved-card-footer"><div><strong>{analysis?.score ?? team.score}</strong><span>live score</span></div><button className="button ghost" onClick={() => onCopy(team)}>Copy reference</button><button className="button secondary" onClick={() => onOpen(team)}>Open team</button><button className="icon-button" onClick={() => onDelete(team.id)} aria-label={`Delete ${team.name}`}>×</button></div></article>;
       })}</div> : <EmptyState icon="▱" title="No saved teams yet" text="Build a lineup you like, then save it here for quick access." action={<button className="button primary" onClick={onCreate}>Open Team Builder</button>} />}
     </section>
   );
@@ -2092,7 +2153,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.9.1 · Transparent GO badge</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team scores recalculate from PvPoke meta strength, top-meta coverage, defensive safety, and the exact saved build. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.0 · Live team analysis</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
     </div>
   );
 }
@@ -2162,8 +2223,17 @@ function MetricBar({ label, value, max }: { label: string; value: number; max: n
   return <div className="metric-bar"><div><span>{label}</span><strong>{value}%</strong></div><i><b style={{ width: `${(value / max) * 100}%` }} /></i></div>;
 }
 
-function CoverageRow({ type, value, danger = false }: { type: string; value: number; danger?: boolean }) {
-  return <div className={`coverage-row ${danger ? "danger" : ""}`}><span style={{ "--type": TYPE_COLORS[type] ?? "#8493a3" } as React.CSSProperties}><i />{type}</span><b><i style={{ width: `${value}%` }} /></b><strong>{value}</strong></div>;
+function TeamScoreBreakdown({ analysis }: { analysis: TeamAnalysis }) {
+  return <div className="score-breakdown" aria-label="Team score breakdown">
+    <div><span>Meta strength</span><strong>{analysis.metaStrength}</strong><small>30%</small></div>
+    <div><span>Meta coverage</span><strong>{analysis.metaCoverage}</strong><small>30%</small></div>
+    <div><span>Team safety</span><strong>{analysis.safety}</strong><small>25%</small></div>
+    <div><span>Build quality</span><strong>{analysis.buildQuality}</strong><small>15%</small></div>
+  </div>;
+}
+
+function CoverageRow({ type, value, detail, danger = false }: { type: string; value: number; detail?: string; danger?: boolean }) {
+  return <div className={`coverage-row ${danger ? "danger" : ""}`}><span style={{ "--type": TYPE_COLORS[type] ?? "#8493a3" } as React.CSSProperties}><i />{type}<small>{detail}</small></span><b><i style={{ width: `${value}%` }} /></b><strong>{value}</strong></div>;
 }
 
 function ProcessStep({ n, title, detail }: { n: string; title: string; detail: string }) {

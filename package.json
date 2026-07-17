@@ -1,6 +1,6 @@
 {
   "name": "pogo-pvp-pro",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "data:sync": "node scripts/sync-pvpoke-data.mjs",
+    "team:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/validate-team-analysis.mjs",
     "data:sprites": "node scripts/sync-pokeapi-sprites.mjs",
     "data:validate": "node scripts/validate-pvpoke-data.mjs"
   },

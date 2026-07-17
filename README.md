@@ -19,7 +19,9 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Interactive team builder with owned-only, Shadow, and Elite TM controls
 - Manual team mode for choosing an exact Lead, Safe switch, and Closer from your collection
 - Lock up to two Pokémon and generate alternate lineups
-- Matchup coverage, target, counter, and upgrade summaries
+- Lineup-specific coverage from the team's equipped move types and actual defensive typings
+- Live 0–100 team score blending PvPoke meta strength (30%), top-30 meta coverage (30%), teammate safety (25%), and saved-build quality (15%)
+- Top-meta target answers and remaining threats, recalculated whenever the lineup or a saved build changes
 - On-device screenshot OCR with a focused CP recovery pass, appraisal-bar IV measurement, form detection, and exact level calculation
 - Batch screenshot intake with manual confirmation and confidence states
 - Searchable PvPoke catalog with all released battle forms and legal moves
@@ -31,13 +33,13 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Empty starter accounts—no Pokémon or lineups are created automatically
 - Responsive navigation and accessible keyboard focus states
 
-Roster battle files use pinned PvPoke Open League simulation results. Team-builder lineup generation remains planning guidance and does not run new simulations on demand.
+Roster battle files use pinned PvPoke Open League simulation results. Team analysis combines those results with the selected forms, typings, equipped moves, CP, level, and PvP IV rank. It remains transparent planning guidance rather than a new on-demand battle simulation.
 
 ## Pokémon data
 
 The import catalog is generated from PvPoke's `pokemon.json` and `moves.json` Game Master sources. It currently contains 1,597 entries marked released across 946 Pokédex numbers. Regional, alternate, Mega, and Shadow builds are separate choices; cosmetic costumes reuse their base form because they do not change PvP stats or moves.
 
-Great, Ultra, and Master League battle files are generated from PvPoke's current Open League ranking exports. The pinned ranking dataset contains 2,389 simulated builds, including recommended moves, best matchups, hardest counters, scores, and editor notes.
+Great, Ultra, and Master League battle files are generated from PvPoke's current Open League ranking exports. The pinned ranking dataset contains 2,389 simulated builds, including recommended moves, best matchups, hardest counters, scores, and editor notes. The pinned catalog also contains 334 moves with their type and battle values for lineup-specific offensive coverage.
 
 The exact upstream commit and generation timestamp are embedded in `src/data/pvpoke-catalog.json`. Refresh it with:
 

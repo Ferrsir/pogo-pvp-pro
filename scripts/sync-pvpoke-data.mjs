@@ -32,6 +32,18 @@ const [pokemonSource, moveSource, headCommit, ...rankingSources] = await Promise
 ]);
 
 const moveNames = new Map(moveSource.map((move) => [move.moveId, move.name]));
+const moves = moveSource
+  .map((move) => ({
+    id: move.moveId,
+    name: move.name,
+    type: titleCase(move.type),
+    category: move.energyGain > 0 ? "fast" : "charged",
+    power: move.power,
+    energy: move.energy,
+    energyGain: move.energyGain,
+    turns: move.turns,
+  }))
+  .sort((left, right) => left.name.localeCompare(right.name));
 const released = pokemonSource
   .filter((pokemon) => pokemon.released === true)
   .map((pokemon) => ({
@@ -60,6 +72,7 @@ const catalog = {
     pokemonCount: released.length,
     pokedexCount: new Set(released.map((pokemon) => pokemon.dex)).size,
   },
+  moves,
   pokemon: released,
 };
 

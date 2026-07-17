@@ -16,6 +16,12 @@ const requiredVariants = [
 if (catalog.pokemon.length !== catalog.source.pokemonCount) throw new Error("Catalog count does not match its source metadata.");
 if (catalog.pokemon.length < 1_500) throw new Error("Catalog unexpectedly contains fewer than 1,500 released forms.");
 if (new Set(catalog.pokemon.map((pokemon) => pokemon.id)).size !== catalog.pokemon.length) throw new Error("Catalog contains duplicate species IDs.");
+if (!Array.isArray(catalog.moves) || catalog.moves.length < 300) throw new Error("Catalog move data is missing or incomplete.");
+if (new Set(catalog.moves.map((move) => move.id)).size !== catalog.moves.length) throw new Error("Catalog contains duplicate move IDs.");
+
+for (const move of catalog.moves) {
+  if (!move.id || !move.name || !move.type || !move.category) throw new Error("Catalog contains an incomplete move.");
+}
 
 for (const pokemon of catalog.pokemon) {
   if (!pokemon.id || !pokemon.name || !pokemon.dex) throw new Error("Catalog contains an incomplete Pokémon identity.");
