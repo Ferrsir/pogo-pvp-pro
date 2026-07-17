@@ -2,6 +2,9 @@
 
 Pogo PVP Pro is a polished, desktop-first Pokémon GO PvP workspace for reviewing a roster, confirming appraisal imports, and building league-aware teams.
 
+**Live app:** https://pogo-pvp-pro.vercel.app  
+**Source repository:** https://github.com/Ferrsir/pogo-pvp-pro
+
 ## Included in this version
 
 - Command Center with roster health and league readiness
@@ -31,6 +34,10 @@ pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+## Deployment
+
+The production site is hosted on Vercel and connected to this GitHub repository. Pushes to `main` trigger a new production deployment automatically.
 
 ## Privacy
 

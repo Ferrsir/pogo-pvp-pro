@@ -43,3 +43,5 @@ next-env.d.ts
 # local import/setup scratch space
 /_starter_import/
 /.pnpm-store/
+
+.vercel
