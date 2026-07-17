@@ -21,6 +21,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Batch screenshot intake with manual confirmation and confidence states
 - Searchable PvPoke catalog with all released battle forms and legal moves
 - Regional, alternate, Mega, and Shadow variant support
+- High-resolution transparent Pokémon artwork from a pinned PokeAPI sprite catalog, with form matching and graceful fallbacks
 - Username/password accounts with Pokémon GO team and trainer-level profiles up to level 80
 - Private, database-backed collections and saved teams
 - Automatic cloud saving with clear sync status
@@ -39,6 +40,12 @@ The exact upstream commit and generation timestamp are embedded in `src/data/pvp
 
 ```bash
 pnpm data:sync
+```
+
+Pokémon artwork is mapped against PokeAPI's transparent Home sprite collection. Refresh the pinned sprite map with:
+
+```bash
+pnpm data:sprites
 ```
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and license terms.

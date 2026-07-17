@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import pvpokeCatalog from "@/data/pvpoke-catalog.json";
+import pokeapiSprites from "@/data/pokeapi-sprites.json";
 import {
   calculateBattleStatsAtLevel,
   findHighestLevelForCap,
@@ -126,6 +127,7 @@ const PVP_POKEMON_OPTIONS = PVP_POKEMON.map((pokemon) => ({ pokemon, label: poke
 const PVP_POKEMON_BY_LABEL = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.label, option.pokemon]));
 const PVP_POKEMON_LABEL_BY_ID = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.pokemon.id, option.label]));
 const PVP_POKEMON_BY_ID = new Map(PVP_POKEMON.map((pokemon) => [pokemon.id, pokemon]));
+const POKEAPI_SPRITE_IDS = pokeapiSprites.spriteIds as Record<string, number>;
 
 function pokemonNameParts(name: string) {
   const forms = Array.from(name.matchAll(/\(([^)]+)\)/g), (match) => match[1]);
@@ -272,6 +274,17 @@ function catalogPokemonForRoster(pokemon: Pokemon) {
     const parts = pokemonNameParts(candidate.name);
     return parts.species === pokemon.species && (formParts.length === 0 ? parts.form === "Normal" : parts.form === pokemon.form);
   }) ?? PVP_POKEMON.find((candidate) => candidate.name === pokemon.species) ?? null;
+}
+
+function pokemonArtwork(pokemon: Pokemon) {
+  const catalogPokemon = catalogPokemonForRoster(pokemon);
+  if (!catalogPokemon) return null;
+  const spriteId = POKEAPI_SPRITE_IDS[catalogPokemon.id] ?? catalogPokemon.dex;
+  return {
+    name: catalogPokemon.name,
+    url: `${pokeapiSprites.source.artworkBaseUrl}/${spriteId}.png`,
+    shadow: catalogPokemon.tags.includes("shadow") || Boolean(pokemon.shadow),
+  };
 }
 
 function getTypeProfile(types: string[]) {
@@ -1505,8 +1518,8 @@ function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: 
             {ranking && <section className="detail-card insight-card"><div className="detail-card-heading"><div><span>PVPOKE EDITOR NOTES</span><h3>How this Pokémon plays</h3></div></div><p>{ranking.notes || `${pokemon.species} is included in PvPoke's Open ${LEAGUES[detailLeague].name} simulations.`}</p></section>}
 
             <div className="detail-matchup-grid">
-              <section className="detail-card"><div className="detail-card-heading"><div><span>FAVORABLE MATCHUPS</span><h3>Strong into</h3></div></div>{ranking ? <div className="matchup-list positive">{ranking.matchups.map((matchup) => <div key={matchup.id}><PokemonMark pokemon={{ ...pokemon, species: opponentName(matchup.id), types: PVP_POKEMON_BY_ID.get(matchup.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(matchup.id)}</strong><small>PvPoke battle rating</small></span><b>{(matchup.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated matchups available.</div>}</section>
-              <section className="detail-card"><div className="detail-card-heading"><div><span>KEY COUNTERS</span><h3>Watch out for</h3></div></div>{ranking ? <div className="matchup-list danger">{ranking.counters.map((counter) => <div key={counter.id}><PokemonMark pokemon={{ ...pokemon, species: opponentName(counter.id), types: PVP_POKEMON_BY_ID.get(counter.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(counter.id)}</strong><small>Your battle rating</small></span><b>{(counter.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated counters available.</div>}</section>
+              <section className="detail-card"><div className="detail-card-heading"><div><span>FAVORABLE MATCHUPS</span><h3>Strong into</h3></div></div>{ranking ? <div className="matchup-list positive">{ranking.matchups.map((matchup) => <div key={matchup.id}><PokemonMark pokemon={{ ...pokemon, catalogId: matchup.id, species: opponentName(matchup.id), types: PVP_POKEMON_BY_ID.get(matchup.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(matchup.id)}</strong><small>PvPoke battle rating</small></span><b>{(matchup.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated matchups available.</div>}</section>
+              <section className="detail-card"><div className="detail-card-heading"><div><span>KEY COUNTERS</span><h3>Watch out for</h3></div></div>{ranking ? <div className="matchup-list danger">{ranking.counters.map((counter) => <div key={counter.id}><PokemonMark pokemon={{ ...pokemon, catalogId: counter.id, species: opponentName(counter.id), types: PVP_POKEMON_BY_ID.get(counter.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(counter.id)}</strong><small>Your battle rating</small></span><b>{(counter.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated counters available.</div>}</section>
             </div>
 
             <div className="detail-secondary-grid">
@@ -1916,7 +1929,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.6 · Manual teams</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.7 · Pokémon artwork</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
     </div>
   );
 }
@@ -1945,7 +1958,20 @@ function PokemonMark({ pokemon, size = "medium" }: { pokemon: Pokemon; size?: "s
   const initials = pokemon.species.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
   const primary = TYPE_COLORS[pokemon.types[0]] ?? "#49a7ff";
   const secondary = TYPE_COLORS[pokemon.types[1] ?? pokemon.types[0]] ?? primary;
-  return <div className={`pokemon-mark ${size}`} style={{ "--primary": primary, "--secondary": secondary } as React.CSSProperties}><span>{initials}</span><i /></div>;
+  const artwork = pokemonArtwork(pokemon);
+  const artworkUrl = artwork?.url ?? "";
+  const [artState, setArtState] = useState<{ url: string; status: "loading" | "loaded" | "failed" }>({ url: artworkUrl, status: artwork ? "loading" : "failed" });
+  const artStatus = artwork && artState.url === artworkUrl ? artState.status : artwork ? "loading" : "failed";
+
+  return <div className={`pokemon-mark ${size} art-${artStatus} ${artwork?.shadow ? "shadow-form" : ""}`} style={{ "--primary": primary, "--secondary": secondary } as React.CSSProperties}>
+    <span aria-hidden="true">{initials}</span>
+    {artwork && <>
+      {/* The transparent artwork is served by the pinned PokeAPI sprite repository. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={artwork.url} alt={`${artwork.name} artwork`} loading={size === "large" ? "eager" : "lazy"} decoding="async" onLoad={() => setArtState({ url: artwork.url, status: "loaded" })} onError={() => setArtState({ url: artwork.url, status: "failed" })} />
+    </>}
+    <i />
+  </div>;
 }
 
 function TypeList({ types }: { types: string[] }) {

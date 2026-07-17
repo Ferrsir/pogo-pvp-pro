@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const catalog = JSON.parse(await readFile(new URL("../src/data/pvpoke-catalog.json", import.meta.url), "utf8"));
 const rankings = JSON.parse(await readFile(new URL("../src/data/pvpoke-rankings.json", import.meta.url), "utf8"));
+const sprites = JSON.parse(await readFile(new URL("../src/data/pokeapi-sprites.json", import.meta.url), "utf8"));
 const requiredVariants = [
   "raichu_alolan",
   "giratina_origin",
@@ -26,6 +27,12 @@ for (const id of requiredVariants) {
   if (!ids.has(id)) throw new Error(`Catalog is missing expected variant ${id}.`);
 }
 
+for (const pokemon of catalog.pokemon) {
+  if (!sprites.spriteIds[pokemon.id]) throw new Error(`Sprite map is missing ${pokemon.id}.`);
+}
+if (sprites.source.mappedEntries !== catalog.pokemon.length) throw new Error("Sprite map count does not match the PvPoke catalog.");
+if (sprites.source.exactFormEntries < 150) throw new Error("Sprite map unexpectedly contains too few form-specific images.");
+
 for (const league of ["GL", "UL", "ML"]) {
   if (!Array.isArray(rankings.leagues[league]) || !rankings.leagues[league].length) throw new Error(`${league} rankings are missing.`);
   for (const [index, ranking] of rankings.leagues[league].entries()) {
@@ -36,3 +43,4 @@ for (const league of ["GL", "UL", "ML"]) {
 
 console.log(`Validated ${catalog.pokemon.length} released PvPoke entries across ${catalog.source.pokedexCount} Pokédex species.`);
 console.log(`Validated ${Object.values(rankings.leagues).reduce((total, league) => total + league.length, 0)} PvPoke ranking entries.`);
+console.log(`Validated ${sprites.source.mappedEntries} PokeAPI artwork mappings, including ${sprites.source.exactFormEntries} form-specific images.`);

@@ -16,6 +16,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Pokémon and Pokémon GO are trademarks of their respective owners. Pogo PVP Pro is an independent fan project and is not affiliated with PvPoke, The Pokémon Company, Nintendo, Niantic, or Scopely.
 
+## PokeAPI sprites
+
+Pokémon artwork is loaded from the public [PokeAPI sprites repository](https://github.com/PokeAPI/sprites). Pogo PVP Pro pins the repository commit used to map PvPoke species and forms. PokeAPI does not claim ownership of Pokémon imagery; Pokémon and all associated artwork remain the property of their respective owners.
+
 ## Tesseract.js
 
 Screenshot text recognition uses [Tesseract.js](https://github.com/naptha/tesseract.js), licensed under the Apache License 2.0. Recognition runs in the user's browser; appraisal images are not sent to the application server.

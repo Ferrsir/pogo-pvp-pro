@@ -960,6 +960,36 @@ button:disabled {
   z-index: 1;
 }
 
+.pokemon-mark img {
+  filter: drop-shadow(0 7px 8px rgba(0, 0, 0, 0.42));
+  height: 94%;
+  object-fit: contain;
+  opacity: 0;
+  position: relative;
+  transform: scale(0.92) translateY(2%);
+  transition: opacity 160ms ease, transform 180ms ease;
+  width: 94%;
+  z-index: 2;
+}
+
+.pokemon-mark.art-loaded img {
+  opacity: 1;
+  transform: scale(1) translateY(1%);
+}
+
+.pokemon-mark.art-loaded span {
+  opacity: 0;
+}
+
+.pokemon-mark.shadow-form img {
+  filter: drop-shadow(0 0 8px rgba(155, 94, 255, 0.72)) drop-shadow(0 7px 8px rgba(0, 0, 0, 0.45));
+}
+
+.pokemon-mark.shadow-form::after {
+  background: radial-gradient(circle, rgba(158, 92, 255, 0.3), transparent 67%);
+  border-color: rgba(172, 116, 255, 0.48);
+}
+
 .pokemon-mark i {
   background: var(--primary);
   border-radius: 50%;
@@ -979,6 +1009,7 @@ button:disabled {
 .pokemon-mark.large { height: 96px; width: 96px; }
 .pokemon-mark.large::before { height: 68px; width: 68px; }
 .pokemon-mark.large span { font-size: 22px; }
+.pokemon-mark.large img { height: 102%; width: 102%; }
 
 .mini-member .pokemon-mark {
   margin-right: 11px;
