@@ -338,6 +338,50 @@ function analyzePokemonIvs(pokemon: Pokemon, catalogPokemon: PvpPokemon, league:
     pokemon.hpIv,
     target.level,
   );
+  const rank = calculatePvpIvRank(
+    catalogPokemon,
+    pokemon.attackIv,
+    pokemon.defenseIv,
+    pokemon.hpIv,
+    league,
+  );
+  return {
+    rank,
+    topPercent: Math.max(0.1, (rank / 4096) * 100),
+    target,
+    targetStats: userStats,
+    powerUps: Math.max(0, Math.round((target.level - pokemon.level) * 2)),
+  };
+}
+
+const PVP_IV_RANK_CACHE = new Map<string, number>();
+
+function calculatePvpIvRank(
+  catalogPokemon: PvpPokemon,
+  userAttackIv: number,
+  userDefenseIv: number,
+  userHpIv: number,
+  league: League,
+) {
+  const cacheKey = `${catalogPokemon.id}:${league}:${userAttackIv}:${userDefenseIv}:${userHpIv}`;
+  const cachedRank = PVP_IV_RANK_CACHE.get(cacheKey);
+  if (cachedRank) return cachedRank;
+
+  const cpCap = league === "GL" ? 1500 : league === "UL" ? 2500 : 10000;
+  const userTarget = findHighestLevelForCap(
+    catalogPokemon.baseStats,
+    userAttackIv,
+    userDefenseIv,
+    userHpIv,
+    cpCap,
+  );
+  const userStats = calculateBattleStatsAtLevel(
+    catalogPokemon.baseStats,
+    userAttackIv,
+    userDefenseIv,
+    userHpIv,
+    userTarget.level,
+  );
   let betterBuilds = 0;
   for (let attackIv = 0; attackIv <= 15; attackIv += 1) {
     for (let defenseIv = 0; defenseIv <= 15; defenseIv += 1) {
@@ -349,13 +393,24 @@ function analyzePokemonIvs(pokemon: Pokemon, catalogPokemon: PvpPokemon, league:
     }
   }
   const rank = betterBuilds + 1;
-  return {
-    rank,
-    topPercent: Math.max(0.1, (rank / 4096) * 100),
-    target,
-    targetStats: userStats,
-    powerUps: Math.max(0, Math.round((target.level - pokemon.level) * 2)),
-  };
+  PVP_IV_RANK_CACHE.set(cacheKey, rank);
+  return rank;
+}
+
+function primaryLeagueForPokemon(pokemon: Pokemon): League {
+  return pokemon.leagues[0] ?? (pokemon.cp <= 1500 ? "GL" : pokemon.cp <= 2500 ? "UL" : "ML");
+}
+
+function pokemonPvpIvRank(pokemon: Pokemon, league = primaryLeagueForPokemon(pokemon)) {
+  const catalogPokemon = catalogPokemonForRoster(pokemon);
+  if (!catalogPokemon) return pokemon.rank || null;
+  return calculatePvpIvRank(
+    catalogPokemon,
+    pokemon.attackIv,
+    pokemon.defenseIv,
+    pokemon.hpIv,
+    league,
+  );
 }
 
 const SAMPLE_ROSTER: Pokemon[] = [
@@ -686,7 +741,15 @@ async function fetchTrainerState(): Promise<{ collection: Pokemon[]; savedTeams:
   const response = await fetch("/api/state", { cache: "no-store" });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error ?? "Saved data is unavailable.");
-  return { collection: payload.collection ?? [], savedTeams: payload.savedTeams ?? [] };
+  const collection = (payload.collection ?? []) as Pokemon[];
+  return {
+    collection: collection.map((pokemon) => {
+      if (pokemon.rank > 0) return pokemon;
+      const rank = pokemonPvpIvRank(pokemon);
+      return rank ? { ...pokemon, rank } : pokemon;
+    }),
+    savedTeams: payload.savedTeams ?? [],
+  };
 }
 
 function App() {
@@ -993,6 +1056,7 @@ function App() {
     const additions: Pokemon[] = valid.map(({ item, catalogPokemon }) => {
       const name = pokemonNameParts(catalogPokemon.name);
       const chargedMoves = [item.chargedMove1 || "Select move", item.chargedMove2 || "Not unlocked"];
+      const league: League = item.cp <= 1500 ? "GL" : item.cp <= 2500 ? "UL" : "ML";
       return {
       id: item.id,
       catalogId: catalogPokemon.id,
@@ -1008,9 +1072,9 @@ function App() {
       recommendedMoves: [],
       types: catalogPokemon.types,
       rating: 70,
-      rank: 0,
+      rank: calculatePvpIvRank(catalogPokemon, item.attackIv, item.defenseIv, item.hpIv, league),
       role: "Needs analysis",
-      leagues: item.cp <= 1500 ? ["GL"] : item.cp <= 2500 ? ["UL"] : ["ML"],
+      leagues: [league],
       ready: false,
       favorite: false,
       shadow: catalogPokemon.tags.includes("shadow") || catalogPokemon.id.endsWith("_shadow"),
@@ -1397,17 +1461,20 @@ function CollectionView({
           <table className="collection-table">
             <thead><tr><th>Pokémon</th><th>League</th><th>CP / Level</th><th>IV spread</th><th>Current moves</th><th>Status</th><th aria-label="Actions" /></tr></thead>
             <tbody>
-              {collection.map((pokemon) => (
+              {collection.map((pokemon) => {
+                const rank = pokemonPvpIvRank(pokemon);
+                return (
                 <tr className="clickable-pokemon-row" key={pokemon.id} onClick={() => onSelect(pokemon.id)}>
                   <td><button type="button" className="pokemon-cell pokemon-detail-trigger" onClick={(event) => { event.stopPropagation(); onSelect(pokemon.id); }} aria-label={`View all details for ${pokemon.species}`}><PokemonMark pokemon={pokemon} size="small" /><span><strong>{pokemon.species}</strong><small>{pokemon.form}</small></span><i aria-hidden="true">→</i></button></td>
                   <td><div className="league-pills">{pokemon.leagues.map((item) => <span key={item} className={`league-pill ${item.toLowerCase()}`}>{item}</span>)}</div></td>
                   <td><strong className="numeric">{pokemon.cp.toLocaleString()}</strong><span className="table-sub">Level {pokemon.level}</span></td>
-                  <td><strong className="numeric">{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</strong><span className="table-sub">Rank #{pokemon.rank || "—"}</span></td>
+                  <td><strong className="numeric">{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</strong><span className="table-sub">Rank #{rank?.toLocaleString() ?? "—"}</span></td>
                   <td><strong className="move-main">{pokemon.fastMove}</strong><span className="table-sub">{pokemon.chargedMoves.join(" · ")}</span></td>
                   <td><span className={`readiness-badge ${pokemon.ready ? "ready" : "needs-work"}`}><i />{pokemon.ready ? "Battle ready" : "Needs work"}</span></td>
                   <td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); onFavorite(pokemon.id); }} aria-label={`${pokemon.favorite ? "Unfavorite" : "Favorite"} ${pokemon.species}`} className={pokemon.favorite ? "favorite" : ""}>★</button><button onClick={(event) => { event.stopPropagation(); onRemove(pokemon.id); }} aria-label={`Remove ${pokemon.species}`}>•••</button></div></td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1732,12 +1799,12 @@ function BuilderView({
             {mode === "manual" ? (
               <div className="member-grid manual-member-grid">
                 {roles.map((role, index) => team[index]
-                  ? <MemberCard key={team[index].id} pokemon={team[index]} role={role} locked={false} manual onLock={() => onToggleManual(team[index].id)} />
+                  ? <MemberCard key={team[index].id} pokemon={team[index]} role={role} league={league} locked={false} manual onLock={() => onToggleManual(team[index].id)} />
                   : <article className="manual-team-slot" key={role}><span>0{index + 1}</span><i>＋</i><strong>{role}</strong><p>Choose from your collection below</p></article>)}
               </div>
             ) : team.length === 3 ? (
               <div className="member-grid">
-                {team.map((pokemon, index) => <MemberCard key={pokemon.id} pokemon={pokemon} role={roles[index]} locked={locked.includes(pokemon.id)} onLock={() => onToggleLock(pokemon.id)} />)}
+                {team.map((pokemon, index) => <MemberCard key={pokemon.id} pokemon={pokemon} role={roles[index]} league={league} locked={locked.includes(pokemon.id)} onLock={() => onToggleLock(pokemon.id)} />)}
               </div>
             ) : (
               <EmptyState icon="◇" title="Not enough eligible builds" text="Relax one of the team rules or import more Pokémon for this league." />
@@ -2025,7 +2092,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.8 · Roster editing</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.8.1 · Exact IV ranks</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
     </div>
   );
 }
@@ -2046,8 +2113,9 @@ function MiniMember({ pokemon, role, index }: { pokemon: Pokemon; role: string; 
   return <article className="mini-member"><div className="member-order">0{index + 1}</div><PokemonMark pokemon={pokemon} /><div className="mini-member-copy"><span>{role.toUpperCase()}</span><strong>{pokemon.species}</strong><small>{pokemon.form} · CP {pokemon.cp.toLocaleString()}</small><TypeList types={pokemon.types} /></div></article>;
 }
 
-function MemberCard({ pokemon, role, locked, manual = false, onLock }: { pokemon: Pokemon; role: string; locked: boolean; manual?: boolean; onLock: () => void }) {
-  return <article className={`member-card ${manual ? "manual" : ""}`}><div className="member-card-top"><span className="role-label">{role.toUpperCase()}</span><button className={manual ? "remove" : locked ? "locked" : ""} onClick={onLock}>{manual ? "× REMOVE" : locked ? "◆ LOCKED" : "◇ LOCK"}</button></div><PokemonMark pokemon={pokemon} size="large" /><h3>{pokemon.species}</h3><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Lv {pokemon.level}</p><TypeList types={pokemon.types} /><div className="move-list"><div><span>FAST</span><strong>{pokemon.fastMove}</strong></div>{pokemon.chargedMoves.map((move, index) => <div key={move}><span>CHG {index + 1}</span><strong>{move}</strong></div>)}</div><div className="member-meta"><span>IV <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><span>Rank <b>#{pokemon.rank || "—"}</b></span>{!pokemon.owned && <em>NOT OWNED</em>}</div></article>;
+function MemberCard({ pokemon, role, league, locked, manual = false, onLock }: { pokemon: Pokemon; role: string; league: League; locked: boolean; manual?: boolean; onLock: () => void }) {
+  const rank = pokemonPvpIvRank(pokemon, league);
+  return <article className={`member-card ${manual ? "manual" : ""}`}><div className="member-card-top"><span className="role-label">{role.toUpperCase()}</span><button className={manual ? "remove" : locked ? "locked" : ""} onClick={onLock}>{manual ? "× REMOVE" : locked ? "◆ LOCKED" : "◇ LOCK"}</button></div><PokemonMark pokemon={pokemon} size="large" /><h3>{pokemon.species}</h3><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Lv {pokemon.level}</p><TypeList types={pokemon.types} /><div className="move-list"><div><span>FAST</span><strong>{pokemon.fastMove}</strong></div>{pokemon.chargedMoves.map((move, index) => <div key={move}><span>CHG {index + 1}</span><strong>{move}</strong></div>)}</div><div className="member-meta"><span>IV <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><span>Rank <b>#{rank?.toLocaleString() ?? "—"}</b></span>{!pokemon.owned && <em>NOT OWNED</em>}</div></article>;
 }
 
 function PokemonMark({ pokemon, size = "medium" }: { pokemon: Pokemon; size?: "small" | "medium" | "large" }) {
