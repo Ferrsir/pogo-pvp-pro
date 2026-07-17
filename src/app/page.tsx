@@ -3,6 +3,7 @@
 import {
   ChangeEvent,
   DragEvent,
+  FormEvent,
   ReactNode,
   useEffect,
   useMemo,
@@ -12,6 +13,17 @@ import {
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
+type TrainerTeam = "Mystic" | "Valor" | "Instinct" | "Unaffiliated";
+type SaveStatus = "loading" | "saving" | "saved" | "error";
+
+type UserProfile = {
+  id: string;
+  username: string;
+  team: TrainerTeam;
+  trainerLevel: number;
+};
+
+const TRAINER_TEAMS: TrainerTeam[] = ["Mystic", "Valor", "Instinct", "Unaffiliated"];
 
 type Pokemon = {
   id: string;
@@ -381,11 +393,6 @@ const FUTURE_BUILDS: Pokemon[] = [
   },
 ];
 
-const INITIAL_TEAMS: SavedTeam[] = [
-  { id: "steady-gl", name: "Open Great — Steady Core", league: "GL", memberIds: ["primeape", "feraligatr", "clodsire"], score: 91, updated: "Today" },
-  { id: "ul-pressure", name: "Ultra — Shield Pressure", league: "UL", memberIds: ["malamar", "giratina", "talonflame"], score: 88, updated: "2 days ago" },
-];
-
 const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "dashboard", label: "Command Center", icon: "⌂" },
   { id: "collection", label: "My Collection", icon: "▦" },
@@ -426,11 +433,19 @@ const COVERAGE: Record<League, { strengths: string[]; threats: string[]; targets
   },
 };
 
+async function fetchTrainerState(): Promise<{ collection: Pokemon[]; savedTeams: SavedTeam[] }> {
+  const response = await fetch("/api/state", { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error ?? "Saved data is unavailable.");
+  return { collection: payload.collection ?? [], savedTeams: payload.savedTeams ?? [] };
+}
+
 function App() {
   const [view, setView] = useState<View>("dashboard");
   const [league, setLeague] = useState<League>("GL");
-  const [collection, setCollection] = useState<Pokemon[]>(SAMPLE_ROSTER);
-  const [savedTeams, setSavedTeams] = useState<SavedTeam[]>(INITIAL_TEAMS);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null | undefined>(undefined);
+  const [collection, setCollection] = useState<Pokemon[]>([]);
+  const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([]);
   const [locked, setLocked] = useState<string[]>([]);
   const [teamSeed, setTeamSeed] = useState(0);
   const [ownedOnly, setOwnedOnly] = useState(true);
@@ -441,31 +456,66 @@ function App() {
   const [importQueue, setImportQueue] = useState<ImportItem[]>([]);
   const [keepScreenshots, setKeepScreenshots] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [stateLoaded, setStateLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
+  const [accountError, setAccountError] = useState("");
   const [toast, setToast] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const loadSavedWorkspace = window.setTimeout(() => {
+    let cancelled = false;
+    async function loadAccount() {
+      localStorage.removeItem("pogo-pvp-pro-roster");
+      localStorage.removeItem("pogo-pvp-pro-teams");
       try {
-        const savedRoster = localStorage.getItem("pogo-pvp-pro-roster");
-        const savedTeamData = localStorage.getItem("pogo-pvp-pro-teams");
-        if (savedRoster) setCollection(JSON.parse(savedRoster));
-        if (savedTeamData) setSavedTeams(JSON.parse(savedTeamData));
-      } catch {
-        // Demo data remains available if local data is malformed.
-      } finally {
-        setHydrated(true);
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Account service unavailable.");
+        if (payload.user) {
+          const state = await fetchTrainerState();
+          if (cancelled) return;
+          setCollection(state.collection);
+          setSavedTeams(state.savedTeams);
+          setStateLoaded(true);
+          setSaveStatus("saved");
+        }
+        if (cancelled) return;
+        setCurrentUser(payload.user);
+      } catch (error) {
+        if (cancelled) return;
+        setAccountError(error instanceof Error ? error.message : "Account service unavailable.");
+        setCurrentUser(null);
       }
-    }, 0);
-    return () => window.clearTimeout(loadSavedWorkspace);
+    }
+    void loadAccount();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
-    localStorage.setItem("pogo-pvp-pro-roster", JSON.stringify(collection));
-    localStorage.setItem("pogo-pvp-pro-teams", JSON.stringify(savedTeams));
-  }, [collection, hydrated, savedTeams]);
+    if (!currentUser || !stateLoaded) return;
+    const controller = new AbortController();
+    const saveTimer = window.setTimeout(async () => {
+      setSaveStatus("saving");
+      try {
+        const response = await fetch("/api/state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ collection, savedTeams }),
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Save failed.");
+        setSaveStatus("saved");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSaveStatus("error");
+      }
+    }, 650);
+    return () => {
+      controller.abort();
+      window.clearTimeout(saveTimer);
+    };
+  }, [collection, currentUser, savedTeams, stateLoaded]);
 
   useEffect(() => {
     if (!toast) return;
@@ -630,11 +680,60 @@ function App() {
     const link = `${window.location.origin}/#team-${savedTeam.id}`;
     try {
       await navigator.clipboard.writeText(link);
-      setToast("Demo team link copied.");
+      setToast("Team reference copied.");
     } catch {
       setToast("Your browser blocked clipboard access.");
     }
   }
+
+  async function handleAuthenticated(user: UserProfile) {
+    setCurrentUser(user);
+    setAccountError("");
+    try {
+      setSaveStatus("loading");
+      const state = await fetchTrainerState();
+      setCollection(state.collection);
+      setSavedTeams(state.savedTeams);
+      setStateLoaded(true);
+      setSaveStatus("saved");
+    } catch (error) {
+      setSaveStatus("error");
+      setCurrentUser(null);
+      setAccountError(error instanceof Error ? error.message : "Saved data is unavailable.");
+      throw error;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      setCurrentUser(null);
+      setCollection([]);
+      setSavedTeams([]);
+      setStateLoaded(false);
+      setSaveStatus("loading");
+      setView("dashboard");
+    }
+  }
+
+  async function updateProfile(profile: Omit<UserProfile, "id">) {
+    const response = await fetch("/api/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? "Profile update failed.");
+    setCurrentUser(payload.user);
+    setToast("Trainer profile updated.");
+  }
+
+  if (currentUser === undefined) return <AuthLoading />;
+  if (currentUser === null) return <AuthScreen initialError={accountError} onAuthenticated={handleAuthenticated} />;
+  if (!stateLoaded) return <AuthLoading label={`Loading ${currentUser.username}'s workspace…`} />;
+
+  const userInitials = currentUser.username.slice(0, 2).toUpperCase();
 
   return (
     <div className={`app-shell ${compactMode ? "is-compact" : ""}`}>
@@ -656,18 +755,18 @@ function App() {
         </nav>
 
         <div className="sidebar-spacer" />
-        <div className="sync-card">
+        <div className={`sync-card ${saveStatus === "error" ? "error" : ""}`}>
           <div className="sync-icon" aria-hidden="true">↻</div>
-          <div><strong>Demo workspace</strong><span>Saved on this device</span></div>
-          <i className="status-dot" />
+          <div><strong>{saveStatus === "saving" ? "Saving changes…" : saveStatus === "error" ? "Sync needs attention" : "Cloud workspace"}</strong><span>{saveStatus === "saved" ? "Everything is saved" : saveStatus === "error" ? "We’ll retry on your next edit" : "Connected to your account"}</span></div>
+          <i className={`status-dot ${saveStatus === "error" ? "error" : ""}`} />
         </div>
         <button className={`settings-link ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")}>
           <span className="nav-icon" aria-hidden="true">⚙</span>Settings
         </button>
         <div className="profile-card">
-          <div className="avatar">FP</div>
-          <div><strong>Trainer Ferri</strong><span>Level 50</span></div>
-          <span className="more">•••</span>
+          <div className="avatar">{userInitials}</div>
+          <div><strong>{currentUser.username}</strong><span>{currentUser.team} · Level {currentUser.trainerLevel}</span></div>
+          <button className="more" onClick={handleLogout} aria-label="Sign out" title="Sign out">↪</button>
         </div>
       </aside>
 
@@ -763,15 +862,18 @@ function App() {
           )}
           {view === "settings" && (
             <SettingsView
+              key={`${currentUser.id}-${currentUser.username}-${currentUser.team}-${currentUser.trainerLevel}`}
+              user={currentUser}
               compactMode={compactMode}
               keepScreenshots={keepScreenshots}
               onCompactMode={setCompactMode}
               onKeepScreenshots={setKeepScreenshots}
+              onProfileSave={updateProfile}
               onReset={() => {
-                if (!window.confirm("Reset this demo workspace to the starter roster?")) return;
-                setCollection(SAMPLE_ROSTER);
-                setSavedTeams(INITIAL_TEAMS);
-                setToast("Demo workspace reset.");
+                if (!window.confirm("Delete every Pokémon and saved team from your account?")) return;
+                setCollection([]);
+                setSavedTeams([]);
+                setToast("Roster and saved teams deleted.");
               }}
             />
           )}
@@ -802,6 +904,10 @@ function Dashboard({
   onNavigate: (view: View) => void;
 }) {
   const coverage = COVERAGE[league];
+  const readyPercent = collection.length ? Math.round((readyCount / collection.length) * 100) : 0;
+  const optimizedPercent = collection.length ? Math.round((collection.filter((pokemon) => pokemon.recommendedMoves.length > 0 && pokemon.recommendedMoves.every((move) => [pokemon.fastMove, ...pokemon.chargedMoves].includes(move))).length / collection.length) * 100) : 0;
+  const secondMovePercent = collection.length ? Math.round((collection.filter((pokemon) => pokemon.chargedMoves[1] && pokemon.chargedMoves[1] !== "Not unlocked").length / collection.length) * 100) : 0;
+  const teamScore = team.length === 3 ? Math.round(team.reduce((sum, pokemon) => sum + pokemon.rating, 0) / 3 - 2) : 0;
   return (
     <>
       <section className="hero-panel">
@@ -826,47 +932,47 @@ function Dashboard({
 
       <section className="stats-row" aria-label="Roster overview">
         <StatCard label="Total Pokémon" value={collection.length.toString()} detail="Across all leagues" icon="▦" tone="blue" />
-        <StatCard label="Battle ready" value={readyCount.toString()} detail={`${Math.round((readyCount / collection.length) * 100)}% of collection`} icon="✓" tone="green" />
+        <StatCard label="Battle ready" value={readyCount.toString()} detail={`${readyPercent}% of collection`} icon="✓" tone="green" />
         <StatCard label="Ready for league" value={leagueReady.toString()} detail={LEAGUES[league].name} icon="◇" tone="purple" />
-        <StatCard label="Saved teams" value={savedCount.toString()} detail="2 recently updated" icon="▱" tone="orange" />
+        <StatCard label="Saved teams" value={savedCount.toString()} detail={savedCount ? "Ready for quick access" : "Build your first lineup"} icon="▱" tone="orange" />
       </section>
 
       <div className="dashboard-grid">
         <section className="panel featured-team">
           <PanelHeader eyebrow="RECOMMENDED LINEUP" title="Battle-ready team" action={<button className="text-button" onClick={() => onNavigate("builder")}>Full analysis →</button>} />
           <LeagueTabs league={league} onChange={onLeague} />
-          <div className="team-strip">
+          {team.length === 3 ? <><div className="team-strip">
             {team.map((pokemon, index) => (
               <MiniMember key={pokemon.id} pokemon={pokemon} role={["Lead", "Safe switch", "Closer"][index]} index={index} />
             ))}
           </div>
           <div className="team-footer">
-            <div className="score-ring" style={{ "--score": "91" } as React.CSSProperties}><strong>91</strong><span>TEAM<br />SCORE</span></div>
+            <div className="score-ring" style={{ "--score": String(teamScore) } as React.CSSProperties}><strong>{teamScore}</strong><span>TEAM<br />SCORE</span></div>
             <div className="coverage-summary">
               <div><span>Strong into</span><TypeList types={coverage.strengths.slice(0, 3)} /></div>
               <div><span>Watch for</span><TypeList types={coverage.threats.slice(0, 3)} /></div>
             </div>
             <button className="button subtle" onClick={() => onNavigate("builder")}>Tune lineup</button>
-          </div>
+          </div></> : <EmptyState icon="＋" title="Your roster is ready for its first entry" text="Import a Pokémon to unlock team recommendations and coverage analysis." action={<button className="button primary" onClick={() => onNavigate("import")}>Add your first Pokémon</button>} />}
         </section>
 
         <aside className="panel readiness-card">
           <PanelHeader eyebrow="THIS WEEK" title="Build readiness" />
-          <div className="readiness-ring"><div><strong>{Math.round((readyCount / collection.length) * 100)}%</strong><span>battle ready</span></div></div>
+          <div className="readiness-ring"><div><strong>{readyPercent}%</strong><span>battle ready</span></div></div>
           <div className="readiness-list">
-            <ProgressRow label="Moves optimized" value={82} tone="blue" />
-            <ProgressRow label="Second move unlocked" value={73} tone="purple" />
-            <ProgressRow label="At target CP" value={91} tone="green" />
+            <ProgressRow label="Moves optimized" value={optimizedPercent} tone="blue" />
+            <ProgressRow label="Second move unlocked" value={secondMovePercent} tone="purple" />
+            <ProgressRow label="Battle ready" value={readyPercent} tone="green" />
           </div>
-          <button className="button secondary wide" onClick={() => onNavigate("collection")}>View upgrade queue <span>4</span></button>
+          <button className="button secondary wide" onClick={() => onNavigate("collection")}>View upgrade queue <span>{Math.max(0, collection.length - readyCount)}</span></button>
         </aside>
       </div>
 
       <section className="panel roster-preview">
         <PanelHeader eyebrow="RECENTLY UPDATED" title="Collection pulse" action={<button className="text-button" onClick={() => onNavigate("collection")}>View all {collection.length} →</button>} />
-        <div className="roster-list">
+        {collection.length ? <div className="roster-list">
           {collection.slice(0, 5).map((pokemon) => <RosterRow key={pokemon.id} pokemon={pokemon} />)}
-        </div>
+        </div> : <EmptyState icon="▦" title="No Pokémon in your collection" text="Your account starts clean. Add appraisal screenshots when you’re ready." action={<button className="button secondary" onClick={() => onNavigate("import")}>Import appraisals</button>} />}
       </section>
     </>
   );
@@ -924,7 +1030,12 @@ function CollectionView({
           </table>
         </div>
       ) : (
-        <EmptyState icon="⌕" title="No roster matches" text="Try a different search or league filter." action={<button className="button secondary" onClick={() => { onQuery(""); onLeagueFilter("ALL"); }}>Reset filters</button>} />
+        <EmptyState
+          icon={query || leagueFilter !== "ALL" ? "⌕" : "＋"}
+          title={query || leagueFilter !== "ALL" ? "No roster matches" : "Your roster is empty"}
+          text={query || leagueFilter !== "ALL" ? "Try a different search or league filter." : "New accounts start clean. Import your first appraisal when you’re ready."}
+          action={query || leagueFilter !== "ALL" ? <button className="button secondary" onClick={() => { onQuery(""); onLeagueFilter("ALL"); }}>Reset filters</button> : <button className="button primary" onClick={onImport}>Add your first Pokémon</button>}
+        />
       )}
     </section>
   );
@@ -1002,7 +1113,7 @@ function BuilderView({
             ) : (
               <EmptyState icon="◇" title="Not enough eligible builds" text="Relax one of the team rules or import more Pokémon for this league." />
             )}
-            <div className="lineup-actions"><p><span>✓</span> All three builds are legal for {LEAGUES[league].name}</p><button className="button secondary" onClick={onSave}>Save this team</button></div>
+            {team.length === 3 && <div className="lineup-actions"><p><span>✓</span> All three builds are legal for {LEAGUES[league].name}</p><button className="button secondary" onClick={onSave}>Save this team</button></div>}
           </section>
 
           <section className="analysis-grid">
@@ -1109,21 +1220,136 @@ function ImportView({
 function TeamsView({ teams, collection, onOpen, onCopy, onDelete, onCreate }: { teams: SavedTeam[]; collection: Pokemon[]; onOpen: (team: SavedTeam) => void; onCopy: (team: SavedTeam) => void; onDelete: (id: string) => void; onCreate: () => void }) {
   return (
     <section className="panel saved-teams-panel">
-      <div className="collection-head"><div><span className="section-eyebrow">BATTLE PLANS</span><h2>Your saved teams</h2><p>Keep proven lines close and share a read-only demo link with friends.</p></div><button className="button primary" onClick={onCreate}>＋ Build a team</button></div>
+      <div className="collection-head"><div><span className="section-eyebrow">BATTLE PLANS</span><h2>Your saved teams</h2><p>Keep proven lines close and copy a quick reference whenever you need it.</p></div><button className="button primary" onClick={onCreate}>＋ Build a team</button></div>
       {teams.length ? <div className="saved-team-grid">{teams.map((team) => {
         const members = team.memberIds.map((id) => collection.find((pokemon) => pokemon.id === id)).filter(Boolean) as Pokemon[];
-        return <article className="saved-team-card" key={team.id}><div className="saved-card-top"><span className={`league-pill ${team.league.toLowerCase()}`}>{team.league}</span><span>Updated {team.updated}</span></div><h3>{team.name}</h3><div className="saved-members">{members.map((pokemon) => <div key={pokemon.id}><PokemonMark pokemon={pokemon} size="small" /><span>{pokemon.species}</span></div>)}</div><div className="saved-card-footer"><div><strong>{team.score}</strong><span>score</span></div><button className="button ghost" onClick={() => onCopy(team)}>Copy link</button><button className="button secondary" onClick={() => onOpen(team)}>Open team</button><button className="icon-button" onClick={() => onDelete(team.id)} aria-label={`Delete ${team.name}`}>×</button></div></article>;
+        return <article className="saved-team-card" key={team.id}><div className="saved-card-top"><span className={`league-pill ${team.league.toLowerCase()}`}>{team.league}</span><span>Updated {team.updated}</span></div><h3>{team.name}</h3><div className="saved-members">{members.map((pokemon) => <div key={pokemon.id}><PokemonMark pokemon={pokemon} size="small" /><span>{pokemon.species}</span></div>)}</div><div className="saved-card-footer"><div><strong>{team.score}</strong><span>score</span></div><button className="button ghost" onClick={() => onCopy(team)}>Copy reference</button><button className="button secondary" onClick={() => onOpen(team)}>Open team</button><button className="icon-button" onClick={() => onDelete(team.id)} aria-label={`Delete ${team.name}`}>×</button></div></article>;
       })}</div> : <EmptyState icon="▱" title="No saved teams yet" text="Build a lineup you like, then save it here for quick access." action={<button className="button primary" onClick={onCreate}>Open Team Builder</button>} />}
     </section>
   );
 }
 
-function SettingsView({ compactMode, keepScreenshots, onCompactMode, onKeepScreenshots, onReset }: { compactMode: boolean; keepScreenshots: boolean; onCompactMode: (value: boolean) => void; onKeepScreenshots: (value: boolean) => void; onReset: () => void }) {
+function AuthLoading({ label = "Opening your battle workspace…" }: { label?: string }) {
+  return (
+    <main className="auth-loading">
+      <span className="brand-mark" aria-hidden="true"><i /></span>
+      <div className="auth-spinner" aria-hidden="true" />
+      <p>{label}</p>
+    </main>
+  );
+}
+
+function AuthScreen({ initialError, onAuthenticated }: { initialError: string; onAuthenticated: (user: UserProfile) => Promise<void> }) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [team, setTeam] = useState<TrainerTeam>("Unaffiliated");
+  const [trainerLevel, setTrainerLevel] = useState(1);
+  const [error, setError] = useState(initialError);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const body = mode === "signup" ? { username, password, team, trainerLevel } : { username, password };
+      const response = await fetch(`/api/auth/${mode === "signup" ? "signup" : "login"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Account request failed.");
+      await onAuthenticated(payload.user);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Account request failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function switchMode(next: "login" | "signup") {
+    setMode(next);
+    setError("");
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-story">
+        <button className="brand auth-brand" aria-label="Pogo PVP Pro">
+          <span className="brand-mark" aria-hidden="true"><i /></span>
+          <span><strong>Pogo PVP</strong><em>PRO</em></span>
+        </button>
+        <div className="auth-copy">
+          <span className="kicker"><i /> YOUR ROSTER. YOUR ACCOUNT.</span>
+          <h1>Build smarter teams.<br />Keep every plan.</h1>
+          <p>A private battle workspace for your collection, saved lineups, and trainer profile—available whenever you sign in.</p>
+          <div className="auth-feature-list">
+            <div><span>01</span><p><strong>Start clean</strong>No starter Pokémon are added for you.</p></div>
+            <div><span>02</span><p><strong>Save automatically</strong>Roster edits and teams sync to your account.</p></div>
+            <div><span>03</span><p><strong>No email required</strong>Just choose a username and password.</p></div>
+          </div>
+        </div>
+        <div className="auth-visual" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="battle-core"><span /><i /></div></div>
+      </section>
+
+      <section className="auth-card-wrap">
+        <div className="auth-card">
+          <div className="auth-tabs" aria-label="Account action">
+            <button className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>Sign in</button>
+            <button className={mode === "signup" ? "active" : ""} onClick={() => switchMode("signup")}>Create account</button>
+          </div>
+          <div className="auth-card-heading">
+            <span className="section-eyebrow">{mode === "login" ? "WELCOME BACK" : "NEW TRAINER"}</span>
+            <h2>{mode === "login" ? "Open your workspace" : "Create your profile"}</h2>
+            <p>{mode === "login" ? "Your private roster is ready when you are." : "Your new collection starts completely empty."}</p>
+          </div>
+          <form className="auth-form" onSubmit={submit}>
+            <label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" placeholder="trainer_name" required /><small>3–24 letters, numbers, or underscores</small></label>
+            <label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} maxLength={128} placeholder="At least 8 characters" required /></label>
+            {mode === "signup" && (
+              <div className="auth-row">
+                <label className="auth-field"><span>Pokémon GO team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={50} required /></label>
+              </div>
+            )}
+            {error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}
+            <button className="button primary auth-submit" disabled={submitting}>{submitting ? "Working…" : mode === "login" ? "Sign in" : "Create account"}<span>→</span></button>
+          </form>
+          <p className="auth-footnote">Private session · Passwords are never stored in plain text</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKeepScreenshots, onProfileSave, onReset }: { user: UserProfile; compactMode: boolean; keepScreenshots: boolean; onCompactMode: (value: boolean) => void; onKeepScreenshots: (value: boolean) => void; onProfileSave: (profile: Omit<UserProfile, "id">) => Promise<void>; onReset: () => void }) {
+  const [username, setUsername] = useState(user.username);
+  const [team, setTeam] = useState<TrainerTeam>(user.team);
+  const [trainerLevel, setTrainerLevel] = useState(user.trainerLevel);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await onProfileSave({ username, team, trainerLevel });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Profile update failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="settings-grid">
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
-      <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT" title="Demo workspace" /><div className="demo-notice"><span>i</span><p><strong>Cloud sync is not connected yet.</strong>This polished demo keeps your changes in this browser. Supabase account sync can be added when project credentials are available.</p></div><button className="button danger" onClick={onReset}>Reset demo data</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>League rankings, matchups, and recommended moves are presented as demo data in this interface. A production data pipeline should pin and attribute its PvPoke and Pokémon GO Game Master-derived sources.</p><div><span>APP VERSION</span><strong>0.1 · UI Preview</strong></div><div><span>LOCAL STORAGE</span><strong>Enabled</strong></div><div><span>ORIGINAL IMAGES</span><strong>{keepScreenshots ? "Retained locally" : "Not retained"}</strong></div></div></section>
+      <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={50} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
+      <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>League rankings, matchups, and recommended moves are currently sample planning data. A future production data pipeline should pin and attribute its PvPoke and Pokémon GO Game Master-derived sources.</p><div><span>APP VERSION</span><strong>0.2 · Accounts</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>ORIGINAL IMAGES</span><strong>{keepScreenshots ? "Retained locally" : "Not retained"}</strong></div></div></section>
     </div>
   );
 }
