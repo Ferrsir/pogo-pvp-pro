@@ -27,6 +27,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Searchable PvPoke catalog with all released battle forms and legal moves
 - Regional, alternate, Mega, and Shadow variant support
 - High-resolution transparent Pokémon artwork from a pinned PokeAPI sprite catalog, with form matching and graceful fallbacks
+- Exact fusion and battle-form artwork aliases for Necrozma, Paldean Tauros, Zacian, and Zamazenta
 - Username/password accounts with Pokémon GO team and trainer-level profiles up to level 80
 - Private, database-backed collections and saved teams
 - Automatic cloud saving with clear sync status

@@ -6,6 +6,15 @@ const outputPath = resolve("src/data/pokeapi-sprites.json");
 const repository = "PokeAPI/sprites";
 const branch = "master";
 const homeArtworkPath = "sprites/pokemon/other/home";
+const pokeapiNameAliases = {
+  necrozma_dusk_mane: ["necrozma-dusk"],
+  necrozma_dawn_wings: ["necrozma-dawn"],
+  tauros_combat: ["tauros-paldea-combat-breed"],
+  tauros_blaze: ["tauros-paldea-blaze-breed"],
+  tauros_aqua: ["tauros-paldea-aqua-breed"],
+  zacian_crowned_sword: ["zacian-crowned"],
+  zamazenta_crowned_shield: ["zamazenta-crowned"],
+};
 
 async function readJson(url) {
   const response = await fetch(url, {
@@ -48,6 +57,7 @@ function spriteCandidates(pokemon) {
     .replace(/_shadow$/, "")
     .replace(/_purified$/, "");
   const candidates = new Set([
+    ...(pokeapiNameAliases[pokemon.id] ?? []),
     slug(withoutBattleState.replaceAll("_", " ")),
     slug(regionalize(withoutBattleState).replaceAll("_", " ")),
   ]);

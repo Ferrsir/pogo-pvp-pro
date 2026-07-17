@@ -12,6 +12,15 @@ const requiredVariants = [
   "charizard_mega_x",
   "oricorio_pau",
 ];
+const requiredExactArtwork = {
+  necrozma_dusk_mane: 10155,
+  necrozma_dawn_wings: 10156,
+  tauros_combat: 10250,
+  tauros_blaze: 10251,
+  tauros_aqua: 10252,
+  zacian_crowned_sword: 10188,
+  zamazenta_crowned_shield: 10189,
+};
 
 if (catalog.pokemon.length !== catalog.source.pokemonCount) throw new Error("Catalog count does not match its source metadata.");
 if (catalog.pokemon.length < 1_500) throw new Error("Catalog unexpectedly contains fewer than 1,500 released forms.");
@@ -35,6 +44,9 @@ for (const id of requiredVariants) {
 
 for (const pokemon of catalog.pokemon) {
   if (!sprites.spriteIds[pokemon.id]) throw new Error(`Sprite map is missing ${pokemon.id}.`);
+}
+for (const [id, expectedSpriteId] of Object.entries(requiredExactArtwork)) {
+  if (sprites.spriteIds[id] !== expectedSpriteId) throw new Error(`${id} should use form-specific sprite ${expectedSpriteId}.`);
 }
 if (sprites.source.mappedEntries !== catalog.pokemon.length) throw new Error("Sprite map count does not match the PvPoke catalog.");
 if (sprites.source.exactFormEntries < 150) throw new Error("Sprite map unexpectedly contains too few form-specific images.");
