@@ -18,7 +18,7 @@ export const trainerLevelSchema = z.coerce
   .number()
   .int()
   .min(1, "Trainer level must be at least 1.")
-  .max(50, "Trainer level cannot be higher than 50.");
+  .max(80, "Trainer level cannot be higher than 80.");
 
 export const signupSchema = z.object({
   username: usernameSchema,

@@ -15,7 +15,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Batch screenshot intake with manual review and confidence states
 - Searchable PvPoke catalog with all released battle forms and legal moves
 - Regional, alternate, Mega, and Shadow variant support
-- Username/password accounts with Pokémon GO team and trainer-level profiles
+- Username/password accounts with Pokémon GO team and trainer-level profiles up to level 80
 - Private, database-backed collections and saved teams
 - Automatic cloud saving with clear sync status
 - Empty starter accounts—no Pokémon or lineups are created automatically

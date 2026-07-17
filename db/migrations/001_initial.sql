@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   username_normalized VARCHAR(24) NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   team VARCHAR(20) NOT NULL CHECK (team IN ('Mystic', 'Valor', 'Instinct', 'Unaffiliated')),
-  trainer_level SMALLINT NOT NULL CHECK (trainer_level BETWEEN 1 AND 50),
+  trainer_level SMALLINT NOT NULL CHECK (trainer_level BETWEEN 1 AND 80),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
