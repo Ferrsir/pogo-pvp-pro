@@ -249,15 +249,67 @@ export function inferPokemonLevel(
   defenseIv: number,
   hpIv: number,
 ) {
-  const attack = baseStats.atk + attackIv;
-  const defense = Math.sqrt(baseStats.def + defenseIv);
-  const stamina = Math.sqrt(baseStats.hp + hpIv);
   const matches: number[] = [];
 
-  CP_MULTIPLIERS.forEach((multiplier, index) => {
-    const calculated = Math.max(10, Math.floor((attack * defense * stamina * multiplier ** 2) / 10));
+  CP_MULTIPLIERS.forEach((_, index) => {
+    const calculated = calculatePokemonCpAtLevel(baseStats, attackIv, defenseIv, hpIv, 1 + index * 0.5);
     if (calculated === cp) matches.push(1 + index * 0.5);
   });
 
   return matches.length === 1 ? matches[0] : null;
+}
+
+function multiplierForLevel(level: number) {
+  const index = Math.round((level - 1) * 2);
+  if (index < 0 || index >= CP_MULTIPLIERS.length || Math.abs(1 + index * 0.5 - level) > 0.001) return null;
+  return CP_MULTIPLIERS[index];
+}
+
+export function calculatePokemonCpAtLevel(
+  baseStats: PokemonBaseStats,
+  attackIv: number,
+  defenseIv: number,
+  hpIv: number,
+  level: number,
+) {
+  const multiplier = multiplierForLevel(level);
+  if (multiplier === null) return 0;
+  return Math.max(10, Math.floor(
+    ((baseStats.atk + attackIv) * Math.sqrt(baseStats.def + defenseIv) * Math.sqrt(baseStats.hp + hpIv) * multiplier ** 2) / 10,
+  ));
+}
+
+export function calculateBattleStatsAtLevel(
+  baseStats: PokemonBaseStats,
+  attackIv: number,
+  defenseIv: number,
+  hpIv: number,
+  level: number,
+) {
+  const multiplier = multiplierForLevel(level) ?? 0;
+  const attack = (baseStats.atk + attackIv) * multiplier;
+  const defense = (baseStats.def + defenseIv) * multiplier;
+  const hp = Math.max(10, Math.floor((baseStats.hp + hpIv) * multiplier));
+  return {
+    cp: calculatePokemonCpAtLevel(baseStats, attackIv, defenseIv, hpIv, level),
+    attack,
+    defense,
+    hp,
+    product: (attack * defense * hp) / 1000,
+  };
+}
+
+export function findHighestLevelForCap(
+  baseStats: PokemonBaseStats,
+  attackIv: number,
+  defenseIv: number,
+  hpIv: number,
+  cpCap: number,
+  maxLevel = 50,
+) {
+  for (let level = maxLevel; level >= 1; level -= 0.5) {
+    const cp = calculatePokemonCpAtLevel(baseStats, attackIv, defenseIv, hpIv, level);
+    if (cp <= cpCap) return { level, cp };
+  }
+  return { level: 1, cp: calculatePokemonCpAtLevel(baseStats, attackIv, defenseIv, hpIv, 1) };
 }

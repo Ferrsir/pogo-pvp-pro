@@ -12,7 +12,12 @@ import {
   useState,
 } from "react";
 import pvpokeCatalog from "@/data/pvpoke-catalog.json";
-import { inferPokemonLevel, scanAppraisalImage } from "@/lib/appraisal-scan";
+import {
+  calculateBattleStatsAtLevel,
+  findHighestLevelForCap,
+  inferPokemonLevel,
+  scanAppraisalImage,
+} from "@/lib/appraisal-scan";
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
@@ -83,6 +88,30 @@ type PvpPokemon = {
   tags: string[];
 };
 
+type PvpRanking = {
+  id: string;
+  name: string;
+  rank: number;
+  score: number;
+  rating: number;
+  moveset: string[];
+  matchups: Array<{ id: string; rating: number }>;
+  counters: Array<{ id: string; rating: number }>;
+  notes: string;
+  stats: { product: number; atk: number; def: number; hp: number };
+};
+
+type PvpRankingsData = {
+  source: {
+    name: string;
+    repository: string;
+    commit: string;
+    sourceUpdatedAt: string;
+    urls: Record<League, string>;
+  };
+  leagues: Record<League, PvpRanking[]>;
+};
+
 const PVP_POKEMON = pvpokeCatalog.pokemon as PvpPokemon[];
 const PVP_NAME_COUNTS = new Map<string, number>();
 for (const pokemon of PVP_POKEMON) PVP_NAME_COUNTS.set(pokemon.name, (PVP_NAME_COUNTS.get(pokemon.name) ?? 0) + 1);
@@ -95,6 +124,7 @@ function pokemonOptionLabel(pokemon: PvpPokemon) {
 const PVP_POKEMON_OPTIONS = PVP_POKEMON.map((pokemon) => ({ pokemon, label: pokemonOptionLabel(pokemon) }));
 const PVP_POKEMON_BY_LABEL = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.label, option.pokemon]));
 const PVP_POKEMON_LABEL_BY_ID = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.pokemon.id, option.label]));
+const PVP_POKEMON_BY_ID = new Map(PVP_POKEMON.map((pokemon) => [pokemon.id, pokemon]));
 
 function pokemonNameParts(name: string) {
   const forms = Array.from(name.matchAll(/\(([^)]+)\)/g), (match) => match[1]);
@@ -183,6 +213,7 @@ const LEAGUES: Record<League, { name: string; cap: string; accent: string }> = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
+  Bug: "#91a83b",
   Water: "#4e90de",
   Ground: "#b98245",
   Poison: "#a963cb",
@@ -199,7 +230,94 @@ const TYPE_COLORS: Record<string, string> = {
   Electric: "#e1b939",
   Grass: "#5eaa68",
   Ice: "#5dbcb9",
+  Rock: "#b69c55",
 };
+
+const BATTLE_TYPES = ["Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting", "Poison", "Ground", "Flying", "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy"] as const;
+
+const TYPE_DEFENSE: Record<string, { weak?: string[]; resist?: string[]; immune?: string[] }> = {
+  Normal: { weak: ["Fighting"], immune: ["Ghost"] },
+  Fire: { weak: ["Water", "Ground", "Rock"], resist: ["Fire", "Grass", "Ice", "Bug", "Steel", "Fairy"] },
+  Water: { weak: ["Electric", "Grass"], resist: ["Fire", "Water", "Ice", "Steel"] },
+  Electric: { weak: ["Ground"], resist: ["Electric", "Flying", "Steel"] },
+  Grass: { weak: ["Fire", "Ice", "Poison", "Flying", "Bug"], resist: ["Water", "Electric", "Grass", "Ground"] },
+  Ice: { weak: ["Fire", "Fighting", "Rock", "Steel"], resist: ["Ice"] },
+  Fighting: { weak: ["Flying", "Psychic", "Fairy"], resist: ["Bug", "Rock", "Dark"] },
+  Poison: { weak: ["Ground", "Psychic"], resist: ["Grass", "Fighting", "Poison", "Bug", "Fairy"] },
+  Ground: { weak: ["Water", "Grass", "Ice"], resist: ["Poison", "Rock"], immune: ["Electric"] },
+  Flying: { weak: ["Electric", "Ice", "Rock"], resist: ["Grass", "Fighting", "Bug"], immune: ["Ground"] },
+  Psychic: { weak: ["Bug", "Ghost", "Dark"], resist: ["Fighting", "Psychic"] },
+  Bug: { weak: ["Fire", "Flying", "Rock"], resist: ["Grass", "Fighting", "Ground"] },
+  Rock: { weak: ["Water", "Grass", "Fighting", "Ground", "Steel"], resist: ["Normal", "Fire", "Poison", "Flying"] },
+  Ghost: { weak: ["Ghost", "Dark"], resist: ["Poison", "Bug"], immune: ["Normal", "Fighting"] },
+  Dragon: { weak: ["Ice", "Dragon", "Fairy"], resist: ["Fire", "Water", "Electric", "Grass"] },
+  Dark: { weak: ["Fighting", "Bug", "Fairy"], resist: ["Ghost", "Dark"], immune: ["Psychic"] },
+  Steel: { weak: ["Fire", "Fighting", "Ground"], resist: ["Normal", "Grass", "Ice", "Flying", "Psychic", "Bug", "Rock", "Dragon", "Steel", "Fairy"], immune: ["Poison"] },
+  Fairy: { weak: ["Poison", "Steel"], resist: ["Fighting", "Bug", "Dark"], immune: ["Dragon"] },
+};
+
+function catalogPokemonForRoster(pokemon: Pokemon) {
+  if (pokemon.catalogId && PVP_POKEMON_BY_ID.has(pokemon.catalogId)) return PVP_POKEMON_BY_ID.get(pokemon.catalogId)!;
+  const formParts = pokemon.form === "Normal" ? [] : pokemon.form.split(" · ");
+  return PVP_POKEMON.find((candidate) => {
+    const parts = pokemonNameParts(candidate.name);
+    return parts.species === pokemon.species && (formParts.length === 0 ? parts.form === "Normal" : parts.form === pokemon.form);
+  }) ?? PVP_POKEMON.find((candidate) => candidate.name === pokemon.species) ?? null;
+}
+
+function getTypeProfile(types: string[]) {
+  const defendingTypes = types.filter((type) => type !== "None");
+  const effectiveness = BATTLE_TYPES.map((attackType) => {
+    let multiplier = 1;
+    for (const defender of defendingTypes) {
+      const rule = TYPE_DEFENSE[defender];
+      if (rule?.weak?.includes(attackType)) multiplier *= 1.6;
+      if (rule?.resist?.includes(attackType)) multiplier *= 0.625;
+      if (rule?.immune?.includes(attackType)) multiplier *= 0.390625;
+    }
+    return { type: attackType, multiplier };
+  });
+  return {
+    weaknesses: effectiveness.filter((item) => item.multiplier > 1.001).sort((a, b) => b.multiplier - a.multiplier),
+    resistances: effectiveness.filter((item) => item.multiplier < 0.999).sort((a, b) => a.multiplier - b.multiplier),
+  };
+}
+
+function analyzePokemonIvs(pokemon: Pokemon, catalogPokemon: PvpPokemon, league: League) {
+  const cpCap = league === "GL" ? 1500 : league === "UL" ? 2500 : 10000;
+  const target = findHighestLevelForCap(
+    catalogPokemon.baseStats,
+    pokemon.attackIv,
+    pokemon.defenseIv,
+    pokemon.hpIv,
+    cpCap,
+  );
+  const userStats = calculateBattleStatsAtLevel(
+    catalogPokemon.baseStats,
+    pokemon.attackIv,
+    pokemon.defenseIv,
+    pokemon.hpIv,
+    target.level,
+  );
+  let betterBuilds = 0;
+  for (let attackIv = 0; attackIv <= 15; attackIv += 1) {
+    for (let defenseIv = 0; defenseIv <= 15; defenseIv += 1) {
+      for (let hpIv = 0; hpIv <= 15; hpIv += 1) {
+        const candidateTarget = findHighestLevelForCap(catalogPokemon.baseStats, attackIv, defenseIv, hpIv, cpCap);
+        const candidateStats = calculateBattleStatsAtLevel(catalogPokemon.baseStats, attackIv, defenseIv, hpIv, candidateTarget.level);
+        if (candidateStats.product > userStats.product + 0.0001) betterBuilds += 1;
+      }
+    }
+  }
+  const rank = betterBuilds + 1;
+  return {
+    rank,
+    topPercent: Math.max(0.1, (rank / 4096) * 100),
+    target,
+    targetStats: userStats,
+    powerUps: Math.max(0, Math.round((target.level - pokemon.level) * 2)),
+  };
+}
 
 const SAMPLE_ROSTER: Pokemon[] = [
   {
@@ -545,6 +663,7 @@ function App() {
   const [allowElite, setAllowElite] = useState(true);
   const [query, setQuery] = useState("");
   const [collectionLeague, setCollectionLeague] = useState<League | "ALL">("ALL");
+  const [selectedPokemonId, setSelectedPokemonId] = useState<string | null>(null);
   const [importQueue, setImportQueue] = useState<ImportItem[]>([]);
   const [keepScreenshots, setKeepScreenshots] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
@@ -644,6 +763,7 @@ function App() {
   const readyCount = collection.filter((pokemon) => pokemon.ready).length;
   const leagueReady = collection.filter((pokemon) => pokemon.leagues.includes(league) && pokemon.ready).length;
   const activeLeague = LEAGUES[league];
+  const selectedPokemon = selectedPokemonId ? collection.find((pokemon) => pokemon.id === selectedPokemonId) ?? null : null;
 
   function navigate(next: View) {
     setView(next);
@@ -886,6 +1006,7 @@ function App() {
       setSavedTeams([]);
       setStateLoaded(false);
       setSaveStatus("loading");
+      setSelectedPokemonId(null);
       setView("dashboard");
     }
   }
@@ -989,6 +1110,7 @@ function App() {
               onLeagueFilter={setCollectionLeague}
               onFavorite={toggleFavorite}
               onRemove={removePokemon}
+              onSelect={setSelectedPokemonId}
               onImport={() => navigate("import")}
             />
           )}
@@ -1054,6 +1176,7 @@ function App() {
         </div>
       </main>
       {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {selectedPokemon && <PokemonDetailDrawer pokemon={selectedPokemon} onClose={() => setSelectedPokemonId(null)} />}
     </div>
   );
 }
@@ -1160,6 +1283,7 @@ function CollectionView({
   onLeagueFilter,
   onFavorite,
   onRemove,
+  onSelect,
   onImport,
 }: {
   collection: Pokemon[];
@@ -1169,6 +1293,7 @@ function CollectionView({
   onLeagueFilter: (value: League | "ALL") => void;
   onFavorite: (id: string) => void;
   onRemove: (id: string) => void;
+  onSelect: (id: string) => void;
   onImport: () => void;
 }) {
   return (
@@ -1190,14 +1315,14 @@ function CollectionView({
             <thead><tr><th>Pokémon</th><th>League</th><th>CP / Level</th><th>IV spread</th><th>Current moves</th><th>Status</th><th aria-label="Actions" /></tr></thead>
             <tbody>
               {collection.map((pokemon) => (
-                <tr key={pokemon.id}>
-                  <td><div className="pokemon-cell"><PokemonMark pokemon={pokemon} size="small" /><div><strong>{pokemon.species}</strong><span>{pokemon.form}</span></div></div></td>
+                <tr className="clickable-pokemon-row" key={pokemon.id} onClick={() => onSelect(pokemon.id)}>
+                  <td><button type="button" className="pokemon-cell pokemon-detail-trigger" onClick={(event) => { event.stopPropagation(); onSelect(pokemon.id); }} aria-label={`View all details for ${pokemon.species}`}><PokemonMark pokemon={pokemon} size="small" /><span><strong>{pokemon.species}</strong><small>{pokemon.form}</small></span><i aria-hidden="true">→</i></button></td>
                   <td><div className="league-pills">{pokemon.leagues.map((item) => <span key={item} className={`league-pill ${item.toLowerCase()}`}>{item}</span>)}</div></td>
                   <td><strong className="numeric">{pokemon.cp.toLocaleString()}</strong><span className="table-sub">Level {pokemon.level}</span></td>
                   <td><strong className="numeric">{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</strong><span className="table-sub">Rank #{pokemon.rank || "—"}</span></td>
                   <td><strong className="move-main">{pokemon.fastMove}</strong><span className="table-sub">{pokemon.chargedMoves.join(" · ")}</span></td>
                   <td><span className={`readiness-badge ${pokemon.ready ? "ready" : "needs-work"}`}><i />{pokemon.ready ? "Battle ready" : "Needs work"}</span></td>
-                  <td><div className="row-actions"><button onClick={() => onFavorite(pokemon.id)} aria-label={`${pokemon.favorite ? "Unfavorite" : "Favorite"} ${pokemon.species}`} className={pokemon.favorite ? "favorite" : ""}>★</button><button onClick={() => onRemove(pokemon.id)} aria-label={`Remove ${pokemon.species}`}>•••</button></div></td>
+                  <td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); onFavorite(pokemon.id); }} aria-label={`${pokemon.favorite ? "Unfavorite" : "Favorite"} ${pokemon.species}`} className={pokemon.favorite ? "favorite" : ""}>★</button><button onClick={(event) => { event.stopPropagation(); onRemove(pokemon.id); }} aria-label={`Remove ${pokemon.species}`}>•••</button></div></td>
                 </tr>
               ))}
             </tbody>
@@ -1212,6 +1337,142 @@ function CollectionView({
         />
       )}
     </section>
+  );
+}
+
+function PokemonDetailDrawer({ pokemon, onClose }: { pokemon: Pokemon; onClose: () => void }) {
+  const [detailLeague, setDetailLeague] = useState<League>(pokemon.cp <= 1500 ? "GL" : pokemon.cp <= 2500 ? "UL" : "ML");
+  const [rankings, setRankings] = useState<PvpRankingsData | null>(null);
+  const [rankingsError, setRankingsError] = useState(false);
+  const catalogPokemon = useMemo(() => catalogPokemonForRoster(pokemon), [pokemon]);
+
+  useEffect(() => {
+    let active = true;
+    import("@/data/pvpoke-rankings.json")
+      .then((module) => { if (active) setRankings(module.default as PvpRankingsData); })
+      .catch(() => { if (active) setRankingsError(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose]);
+
+  const ranking = useMemo(
+    () => rankings && catalogPokemon ? rankings.leagues[detailLeague].find((entry) => entry.id === catalogPokemon.id) ?? null : null,
+    [catalogPokemon, detailLeague, rankings],
+  );
+  const ivAnalysis = useMemo(
+    () => catalogPokemon ? analyzePokemonIvs(pokemon, catalogPokemon, detailLeague) : null,
+    [catalogPokemon, detailLeague, pokemon],
+  );
+  const typeProfile = useMemo(() => getTypeProfile(catalogPokemon?.types ?? pokemon.types), [catalogPokemon, pokemon.types]);
+  const leagueCpCap = detailLeague === "GL" ? 1500 : detailLeague === "UL" ? 2500 : 10000;
+  const currentChargedMoves = pokemon.chargedMoves.filter((move) => move && move !== "Not unlocked" && move !== "Select move");
+  const recommendedMoves = ranking?.moveset ?? [];
+  const missingRecommendedMoves = recommendedMoves.slice(1).filter((move) => !currentChargedMoves.includes(move));
+  const fastMoveReady = !recommendedMoves[0] || pokemon.fastMove === recommendedMoves[0];
+  const secondMoveReady = currentChargedMoves.length >= 2;
+  const movesReady = Boolean(ranking && fastMoveReady && missingRecommendedMoves.length === 0 && secondMoveReady);
+  const levelReady = Boolean(ivAnalysis && ivAnalysis.powerUps === 0 && pokemon.cp <= leagueCpCap);
+  const buildReady = movesReady && levelReady;
+  const ivPercent = Math.round(((pokemon.attackIv + pokemon.defenseIv + pokemon.hpIv) / 45) * 100);
+  const sourceDate = rankings ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(rankings.source.sourceUpdatedAt)) : "";
+  const pvpokeUrl = catalogPokemon ? `https://pvpoke.com/rankings/all/${leagueCpCap}/overall/${catalogPokemon.id}/` : "https://pvpoke.com/rankings/";
+
+  const upgradeSteps: Array<{ tone: string; title: string; detail: string }> = [];
+  if (pokemon.cp > leagueCpCap) {
+    upgradeSteps.push({ tone: "danger", title: `Not eligible for ${LEAGUES[detailLeague].name}`, detail: `${pokemon.cp.toLocaleString()} CP is above the ${leagueCpCap.toLocaleString()} CP limit.` });
+  } else if (ivAnalysis?.powerUps) {
+    upgradeSteps.push({ tone: "blue", title: `Power up ${ivAnalysis.powerUps} time${ivAnalysis.powerUps === 1 ? "" : "s"}`, detail: `Level ${pokemon.level} → ${ivAnalysis.target.level} · CP ${pokemon.cp.toLocaleString()} → ${ivAnalysis.target.cp.toLocaleString()}` });
+  }
+  if (ranking && !fastMoveReady) {
+    upgradeSteps.push({ tone: "purple", title: `Use a ${catalogPokemon?.eliteMoves.includes(recommendedMoves[0]) ? "Elite " : ""}Fast TM`, detail: `${pokemon.fastMove} → ${recommendedMoves[0]}` });
+  }
+  if (ranking && missingRecommendedMoves.length) {
+    upgradeSteps.push({ tone: "orange", title: "Fix the charged moves", detail: `Target ${missingRecommendedMoves.join(" + ")}${missingRecommendedMoves.some((move) => catalogPokemon?.eliteMoves.includes(move)) ? " · Elite TM required" : ""}` });
+  }
+  if (ranking && !secondMoveReady) {
+    upgradeSteps.push({ tone: "green", title: "Unlock the second charged move", detail: "Required for full coverage and the recommended PvPoke moveset." });
+  }
+
+  function opponentName(id: string) {
+    return PVP_POKEMON_BY_ID.get(id)?.name ?? id.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  return (
+    <div className="pokemon-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="pokemon-detail-drawer" role="dialog" aria-modal="true" aria-label={`${pokemon.species} battle details`}>
+        <header className="detail-hero">
+          <div className="detail-identity">
+            <PokemonMark pokemon={pokemon} />
+            <div><span className="section-eyebrow">POKÉMON BATTLE FILE</span><h2>{pokemon.species}</h2><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Level {pokemon.level}</p><TypeList types={catalogPokemon?.types ?? pokemon.types} /></div>
+          </div>
+          <div className="detail-hero-actions"><span className={`detail-ready-pill ${buildReady ? "ready" : "needs-work"}`}><i />{buildReady ? `${LEAGUES[detailLeague].name} ready` : "Upgrades recommended"}</span><button className="detail-close" autoFocus onClick={onClose} aria-label="Close Pokémon details">×</button></div>
+        </header>
+
+        <div className="detail-league-bar">
+          <div><span>Analyze for</span><strong>{LEAGUES[detailLeague].name}</strong></div>
+          <div className="detail-league-tabs">{(["GL", "UL", "ML"] as const).map((league) => <button key={league} className={detailLeague === league ? "active" : ""} onClick={() => setDetailLeague(league)}>{league}<span>{LEAGUES[league].cap}</span></button>)}</div>
+          <a href={pvpokeUrl} target="_blank" rel="noreferrer">Open on PvPoke ↗</a>
+        </div>
+
+        {!catalogPokemon ? (
+          <div className="detail-loading">This older roster entry is missing a catalog match. Re-import its appraisal to unlock the full battle file.</div>
+        ) : (
+          <div className="detail-scroll">
+            <section className="detail-stat-grid">
+              <article><span>PVPOKE META RANK</span><strong>{ranking ? `#${ranking.rank}` : "Unranked"}</strong><small>{ranking ? `${ranking.score.toFixed(1)} overall score` : `No Open ${detailLeague} simulation`}</small></article>
+              <article><span>YOUR PVP IV RANK</span><strong>{ivAnalysis ? `#${ivAnalysis.rank}` : "—"}</strong><small>{ivAnalysis ? `Top ${ivAnalysis.topPercent.toFixed(ivAnalysis.topPercent < 10 ? 1 : 0)}% of 4,096 spreads` : "Calculating"}</small></article>
+              <article><span>TARGET BUILD</span><strong>{ivAnalysis ? `${ivAnalysis.target.cp.toLocaleString()} CP` : "—"}</strong><small>{ivAnalysis ? `Level ${ivAnalysis.target.level} · ${ivAnalysis.powerUps} power-ups left` : "Calculating"}</small></article>
+              <article><span>APPRAISAL</span><strong>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</strong><small>{ivPercent}% perfect IV total</small></article>
+            </section>
+
+            <div className="detail-primary-grid">
+              <section className="detail-card best-moves-card">
+                <div className="detail-card-heading"><div><span>PVPOKE RECOMMENDATION</span><h3>Best moves for {detailLeague}</h3></div>{ranking && <b>{ranking.score.toFixed(1)}</b>}</div>
+                {!rankings && !rankingsError ? <div className="detail-loading compact">Loading current league rankings…</div> : ranking ? (
+                  <>
+                    <div className="recommended-moves">{ranking.moveset.map((move, index) => <div key={move} className={[pokemon.fastMove, ...currentChargedMoves].includes(move) ? "owned" : "missing"}><span>{index === 0 ? "FAST" : index === 1 ? "CHARGED" : "COVERAGE"}</span><strong>{move}</strong><small>{catalogPokemon.eliteMoves.includes(move) ? "Elite TM move" : [pokemon.fastMove, ...currentChargedMoves].includes(move) ? "Already equipped" : "TM or unlock needed"}</small></div>)}</div>
+                    <div className="current-build-line"><span>Current</span><strong>{pokemon.fastMove}</strong><i>+</i>{currentChargedMoves.length ? currentChargedMoves.map((move) => <strong key={move}>{move}</strong>) : <strong>No charged move confirmed</strong>}</div>
+                  </>
+                ) : <div className="detail-loading compact">This form is not currently ranked in Open {LEAGUES[detailLeague].name}. Legal moves are still listed below.</div>}
+              </section>
+
+              <section className="detail-card upgrade-card">
+                <div className="detail-card-heading"><div><span>BUILD CHECKLIST</span><h3>What to do next</h3></div><b>{upgradeSteps.length}</b></div>
+                {!rankings && !rankingsError ? <div className="detail-loading compact">Checking this build against PvPoke simulations…</div> : upgradeSteps.length ? <div className="upgrade-list">{upgradeSteps.map((step) => <div key={`${step.title}-${step.detail}`} className={step.tone}><i /> <div><strong>{step.title}</strong><span>{step.detail}</span></div></div>)}</div> : <div className="all-ready"><span>✓</span><div><strong>No upgrades needed</strong><p>This build is at its target level with the recommended moves for {LEAGUES[detailLeague].name}.</p></div></div>}
+              </section>
+            </div>
+
+            {ranking && <section className="detail-card insight-card"><div className="detail-card-heading"><div><span>PVPOKE EDITOR NOTES</span><h3>How this Pokémon plays</h3></div></div><p>{ranking.notes || `${pokemon.species} is included in PvPoke's Open ${LEAGUES[detailLeague].name} simulations.`}</p></section>}
+
+            <div className="detail-matchup-grid">
+              <section className="detail-card"><div className="detail-card-heading"><div><span>FAVORABLE MATCHUPS</span><h3>Strong into</h3></div></div>{ranking ? <div className="matchup-list positive">{ranking.matchups.map((matchup) => <div key={matchup.id}><PokemonMark pokemon={{ ...pokemon, species: opponentName(matchup.id), types: PVP_POKEMON_BY_ID.get(matchup.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(matchup.id)}</strong><small>PvPoke battle rating</small></span><b>{(matchup.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated matchups available.</div>}</section>
+              <section className="detail-card"><div className="detail-card-heading"><div><span>KEY COUNTERS</span><h3>Watch out for</h3></div></div>{ranking ? <div className="matchup-list danger">{ranking.counters.map((counter) => <div key={counter.id}><PokemonMark pokemon={{ ...pokemon, species: opponentName(counter.id), types: PVP_POKEMON_BY_ID.get(counter.id)?.types ?? [] }} size="small" /><span><strong>{opponentName(counter.id)}</strong><small>Your battle rating</small></span><b>{(counter.rating / 10).toFixed(1)}</b></div>)}</div> : <div className="detail-loading compact">No simulated counters available.</div>}</section>
+            </div>
+
+            <div className="detail-secondary-grid">
+              <section className="detail-card"><div className="detail-card-heading"><div><span>DEFENSIVE PROFILE</span><h3>Weaknesses & resistances</h3></div></div><div className="effectiveness-block"><span>TAKES SUPER-EFFECTIVE DAMAGE</span><div>{typeProfile.weaknesses.map((item) => <span key={item.type} style={{ "--type": TYPE_COLORS[item.type] } as React.CSSProperties}><i />{item.type}<b>×{Number(item.multiplier.toFixed(3))}</b></span>)}</div></div><div className="effectiveness-block resist"><span>RESISTS</span><div>{typeProfile.resistances.map((item) => <span key={item.type} style={{ "--type": TYPE_COLORS[item.type] } as React.CSSProperties}><i />{item.type}<b>×{Number(item.multiplier.toFixed(3))}</b></span>)}</div></div></section>
+              <section className="detail-card"><div className="detail-card-heading"><div><span>BATTLE STATS</span><h3>At the league target</h3></div></div><div className="battle-stat-list"><div><span>Attack</span><strong>{ivAnalysis?.targetStats.attack.toFixed(1)}</strong></div><div><span>Defense</span><strong>{ivAnalysis?.targetStats.defense.toFixed(1)}</strong></div><div><span>HP</span><strong>{ivAnalysis?.targetStats.hp}</strong></div><div><span>Stat product</span><strong>{ivAnalysis?.targetStats.product.toFixed(1)}</strong></div></div><p className="detail-help">Calculated from this Pokémon&apos;s {pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv} IV spread at level {ivAnalysis?.target.level}.</p></section>
+            </div>
+
+            <section className="detail-card move-pool-card"><div className="detail-card-heading"><div><span>COMPLETE MOVE POOL</span><h3>Every legal move for this form</h3></div></div><div className="move-pool"><div><span>FAST MOVES</span>{catalogPokemon.fastMoves.map((move) => <b key={move} className={ranking?.moveset.includes(move) ? "recommended" : ""}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</b>)}</div><div><span>CHARGED MOVES</span>{catalogPokemon.chargedMoves.map((move) => <b key={move} className={ranking?.moveset.includes(move) ? "recommended" : ""}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</b>)}</div></div></section>
+
+            <footer className="detail-source"><span>Data: PvPoke Open League rankings{sourceDate ? ` · ${sourceDate}` : ""}</span>{rankings && <a href={rankings.source.urls[detailLeague]} target="_blank" rel="noreferrer">View source data ↗</a>}</footer>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

@@ -9,6 +9,10 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 
 - Command Center with roster health and league readiness
 - Searchable Great, Ultra, and Master League collection view
+- Click any roster entry to open a complete PvP battle file
+- Current PvPoke Open League rank, score, recommended moves, matchups, counters, and editor notes
+- Exact PvP IV rank across all 4,096 spreads with target CP, target level, and remaining power-ups
+- Type weaknesses, resistances, target battle stats, and the complete legal move pool
 - Interactive team builder with owned-only, Shadow, and Elite TM controls
 - Lock up to two Pokémon and generate alternate lineups
 - Matchup coverage, target, counter, and upgrade summaries
@@ -22,11 +26,13 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Empty starter accounts—no Pokémon or lineups are created automatically
 - Responsive navigation and accessible keyboard focus states
 
-Team rankings, matchups, and recommended moves remain sample planning data. The app does not claim live PvPoke simulation results before that service is connected.
+Roster battle files use pinned PvPoke Open League simulation results. Team-builder lineup generation remains planning guidance and does not run new simulations on demand.
 
 ## Pokémon data
 
 The import catalog is generated from PvPoke's `pokemon.json` and `moves.json` Game Master sources. It currently contains 1,597 entries marked released across 946 Pokédex numbers. Regional, alternate, Mega, and Shadow builds are separate choices; cosmetic costumes reuse their base form because they do not change PvP stats or moves.
+
+Great, Ultra, and Master League battle files are generated from PvPoke's current Open League ranking exports. The pinned ranking dataset contains 2,389 simulated builds, including recommended moves, best matchups, hardest counters, scores, and editor notes.
 
 The exact upstream commit and generation timestamp are embedded in `src/data/pvpoke-catalog.json`. Refresh it with:
 
@@ -65,7 +71,6 @@ Passwords are salted and hashed with scrypt. Sessions use random, hashed databas
 
 ## Production roadmap
 
-1. Connect live PvPoke ranking simulations for league scores and matchup recommendations.
-2. Add PvP IV rank and upgrade-cost calculations.
-3. Add password recovery or an explicit account deletion flow.
-4. Add production share tokens, automated tests, and CI deployment.
+1. Add password recovery or an explicit account deletion flow.
+2. Add Stardust, Candy, Candy XL, and TM inventory tracking.
+3. Add production share tokens, automated tests, and CI deployment.

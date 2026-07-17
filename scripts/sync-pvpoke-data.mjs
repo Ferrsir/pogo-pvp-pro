@@ -5,6 +5,11 @@ const repository = "pvpoke/pvpoke";
 const branch = "master";
 const pokemonPath = "src/data/gamemaster/pokemon.json";
 const movesPath = "src/data/gamemaster/moves.json";
+const rankingPaths = {
+  GL: "src/data/rankings/all/overall/rankings-1500.json",
+  UL: "src/data/rankings/all/overall/rankings-2500.json",
+  ML: "src/data/rankings/all/overall/rankings-10000.json",
+};
 const rawBase = `https://raw.githubusercontent.com/${repository}/${branch}`;
 
 async function readJson(url) {
@@ -19,10 +24,11 @@ function titleCase(value) {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }
 
-const [pokemonSource, moveSource, headCommit] = await Promise.all([
+const [pokemonSource, moveSource, headCommit, ...rankingSources] = await Promise.all([
   readJson(`${rawBase}/${pokemonPath}`),
   readJson(`${rawBase}/${movesPath}`),
   readJson(`https://api.github.com/repos/${repository}/commits/${branch}`),
+  ...Object.values(rankingPaths).map((path) => readJson(`${rawBase}/${path}`)),
 ]);
 
 const moveNames = new Map(moveSource.map((move) => [move.moveId, move.name]));
@@ -57,7 +63,39 @@ const catalog = {
   pokemon: released,
 };
 
+function compactRanking(entry, index) {
+  return {
+    id: entry.speciesId,
+    name: entry.speciesName,
+    rank: index + 1,
+    score: entry.score,
+    rating: entry.rating,
+    moveset: entry.moveset.map((move) => moveNames.get(move) ?? titleCase(move.replaceAll("_", " "))),
+    matchups: entry.matchups.map((matchup) => ({ id: matchup.opponent, rating: matchup.rating })),
+    counters: entry.counters.map((counter) => ({ id: counter.opponent, rating: counter.rating })),
+    notes: entry.editorNotes ?? "",
+    stats: entry.stats,
+  };
+}
+
+const rankings = {
+  source: {
+    name: "PvPoke Open League overall rankings",
+    repository: `https://github.com/${repository}`,
+    commit: headCommit.sha,
+    sourceUpdatedAt: headCommit.commit.author.date,
+    generatedAt: new Date().toISOString(),
+    urls: Object.fromEntries(Object.entries(rankingPaths).map(([league, path]) => [league, `https://github.com/${repository}/blob/${headCommit.sha}/${path}`])),
+  },
+  leagues: Object.fromEntries(
+    Object.keys(rankingPaths).map((league, index) => [league, rankingSources[index].map(compactRanking)]),
+  ),
+};
+
 const outputPath = resolve("src/data/pvpoke-catalog.json");
+const rankingsOutputPath = resolve("src/data/pvpoke-rankings.json");
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(catalog)}\n`, "utf8");
+await writeFile(rankingsOutputPath, `${JSON.stringify(rankings)}\n`, "utf8");
 console.log(`Wrote ${released.length} released PvPoke entries to ${outputPath}.`);
+console.log(`Wrote ${Object.values(rankings.leagues).reduce((total, league) => total + league.length, 0)} PvPoke league rankings to ${rankingsOutputPath}.`);
