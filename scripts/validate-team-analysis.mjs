@@ -1,6 +1,6 @@
 import catalog from "../src/data/pvpoke-catalog.json" with { type: "json" };
 import rankings from "../src/data/pvpoke-rankings.json" with { type: "json" };
-import { analyzeTeam } from "../src/lib/team-analysis.ts";
+import { analyzeTeam, recommendTeams } from "../src/lib/team-analysis.ts";
 
 const byId = new Map(catalog.pokemon.map((pokemon) => [pokemon.id, pokemon]));
 const league = "GL";
@@ -35,6 +35,8 @@ const analyses = [0, 3, 6, 9].map((start) => {
   for (const value of [analysis.score, analysis.metaStrength, analysis.metaCoverage, analysis.safety, analysis.buildQuality]) {
     if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error(`Invalid analysis grade ${value}.`);
   }
+  if (analysis.roles.map((role) => role.role).join("|") !== "Lead|Safe switch|Closer") throw new Error("Role assignment is incomplete.");
+  if (new Set(analysis.roles.map((role) => role.pokemonId)).size !== 3) throw new Error("A Pokémon was assigned to more than one role.");
   return analysis;
 });
 
@@ -46,4 +48,18 @@ if (scores.size < 2) throw new Error("Distinct lineups produced the same team sc
 if (coverageMaps.size < 2) throw new Error("Distinct lineups produced the same offensive coverage map.");
 if (threatMaps.size < 2) throw new Error("Distinct lineups produced the same defensive threat map.");
 
+const exactCandidates = rankings.leagues[league].slice(0, 30).map(savedBuild);
+const exactRecommendations = recommendTeams(exactCandidates, [], league, rankings);
+if (!exactRecommendations.exact || exactRecommendations.evaluatedCount < 3_000) throw new Error("The recommender did not exhaustively test the uploaded roster.");
+if (exactRecommendations.lineups.length < 2 || exactRecommendations.lineups[0].analysis.score < exactRecommendations.lineups[1].analysis.score) throw new Error("Recommendations are not sorted by best score.");
+if (exactRecommendations.lineups[0].team.map((pokemon) => pokemon.id).join("|") !== exactRecommendations.lineups[0].analysis.roles.map((role) => role.pokemonId).join("|")) throw new Error("Recommended lineup is not ordered by assigned role.");
+
+const largeCandidates = rankings.leagues[league].slice(0, 50).map(savedBuild);
+const recommendations = recommendTeams(largeCandidates, [], league, rankings);
+const repeatedRecommendations = recommendTeams(largeCandidates, [], league, rankings);
+if (recommendations.exact || recommendations.shortlistCount >= largeCandidates.length || recommendations.evaluatedCount > 12_000) throw new Error("Large-roster role screening did not stay within its deterministic search budget.");
+if (recommendations.lineups[0].team.map((pokemon) => pokemon.id).join("|") !== repeatedRecommendations.lineups[0].team.map((pokemon) => pokemon.id).join("|")) throw new Error("The same roster produced a different top recommendation.");
+
 console.log(`Validated ${analyses.length} distinct lineups: ${scores.size} scores, ${coverageMaps.size} coverage maps, ${threatMaps.size} threat maps.`);
+console.log(`Validated exhaustive recommendations across ${exactRecommendations.evaluatedCount} legal uploaded-roster combinations.`);
+console.log(`Validated deterministic large-roster screening across ${recommendations.evaluatedCount} finalist combinations.`);

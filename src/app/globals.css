@@ -2475,6 +2475,23 @@ button:disabled {
 .score-breakdown strong { color: #dbe9f7; font-size: 14px; }
 .score-breakdown small { color: #53657a; font-size: 8px; grid-column: 1 / -1; }
 
+.recommendation-proof {
+  align-items: center;
+  background: rgba(71, 214, 166, 0.055);
+  border: 1px solid rgba(71, 214, 166, 0.14);
+  border-radius: 9px;
+  color: #8295a9;
+  display: flex;
+  font-size: 9px;
+  gap: 9px;
+  margin: -5px 0 17px;
+  padding: 9px 11px;
+}
+
+.recommendation-proof > span { color: var(--green); font-size: 13px; }
+.recommendation-proof p { line-height: 1.55; margin: 0; }
+.recommendation-proof strong { color: #c4d9ce; }
+
 .member-grid {
   display: grid;
   gap: 10px;
@@ -2607,6 +2624,21 @@ button:disabled {
   font-size: 8px;
   margin: 0 0 8px;
 }
+
+.role-fit {
+  background: rgba(73, 167, 255, 0.055);
+  border: 1px solid rgba(73, 167, 255, 0.11);
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 1px 0 9px;
+  padding: 7px 8px;
+  width: 100%;
+}
+
+.role-fit span { color: #5d7895; font-size: 7px; font-weight: 900; letter-spacing: 0.1em; }
+.role-fit strong { color: #9fb5ca; font-size: 8px; line-height: 1.35; }
 
 .member-card .type-list {
   justify-content: center;
@@ -3912,6 +3944,7 @@ button:disabled {
   .member-card-top { grid-column: 1 / -1; }
   .member-card .pokemon-mark { grid-row: 2 / span 4; justify-self: center; }
   .member-card > h3, .member-card > p { margin: 0; }
+  .member-card .role-fit { grid-column: 2; margin: 0; }
   .member-card .type-list { justify-content: flex-start; }
   .manual-team-slot { min-height: 210px; }
   .move-list { margin-top: 4px; }
