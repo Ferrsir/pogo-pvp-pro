@@ -2172,6 +2172,11 @@ button:disabled {
   border-color: rgba(78, 212, 160, 0.18);
 }
 
+.review-item.is-scanning {
+  border-color: rgba(73, 167, 255, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(73, 167, 255, 0.05);
+}
+
 .review-item > img {
   border-radius: 9px;
   height: 176px;
@@ -2193,6 +2198,28 @@ button:disabled {
 .review-title strong { flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-title button { background: transparent; border: 0; color: #68788c; cursor: pointer; font-size: 18px; line-height: 1; }
 
+.scan-state {
+  border: 1px solid rgba(243, 169, 77, 0.25);
+  border-radius: 99px;
+  color: var(--orange);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.scan-state.scanning {
+  border-color: rgba(73, 167, 255, 0.28);
+  color: var(--blue);
+}
+
+.scan-state.ready {
+  border-color: rgba(78, 212, 160, 0.28);
+  color: var(--green);
+}
+
 .field-row,
 .iv-field-row {
   display: grid;
@@ -2202,7 +2229,7 @@ button:disabled {
 }
 
 .iv-field-row {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .field-row label,
@@ -2229,6 +2256,12 @@ button:disabled {
   min-width: 0;
   padding: 0 10px;
   width: 100%;
+}
+
+.field-row input:disabled,
+.iv-field-row input:disabled {
+  color: #77889b;
+  cursor: wait;
 }
 
 .species-search-field input {
@@ -3012,6 +3045,7 @@ button:disabled {
   .base-stat-line { flex-basis: 100%; padding-left: 30px; }
   .move-field-row { grid-template-columns: 1fr; }
   .field-row { grid-template-columns: 1fr; }
+  .iv-field-row { grid-template-columns: repeat(2, 1fr); }
   .review-footer { align-items: flex-start; flex-direction: column; gap: 12px; }
   .review-footer .button { width: 100%; }
   .saved-members { grid-template-columns: 1fr; }

@@ -15,3 +15,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Pokémon and Pokémon GO are trademarks of their respective owners. Pogo PVP Pro is an independent fan project and is not affiliated with PvPoke, The Pokémon Company, Nintendo, Niantic, or Scopely.
+
+## Tesseract.js
+
+Screenshot text recognition uses [Tesseract.js](https://github.com/naptha/tesseract.js), licensed under the Apache License 2.0. Recognition runs in the user's browser; appraisal images are not sent to the application server.

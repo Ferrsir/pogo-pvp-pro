@@ -2,6 +2,7 @@
 
 import {
   ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
   DragEvent,
   FormEvent,
   ReactNode,
@@ -11,6 +12,7 @@ import {
   useState,
 } from "react";
 import pvpokeCatalog from "@/data/pvpoke-catalog.json";
+import { inferPokemonLevel, scanAppraisalImage } from "@/lib/appraisal-scan";
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
@@ -60,10 +62,13 @@ type ImportItem = {
   chargedMove1: string;
   chargedMove2: string;
   cp: number;
+  level: number;
   attackIv: number;
   defenseIv: number;
   hpIv: number;
   confidence: number;
+  scanStatus: "scanning" | "ready" | "needs-review" | "error";
+  scanMessage: string;
 };
 
 type PvpPokemon = {
@@ -89,6 +94,7 @@ function pokemonOptionLabel(pokemon: PvpPokemon) {
 
 const PVP_POKEMON_OPTIONS = PVP_POKEMON.map((pokemon) => ({ pokemon, label: pokemonOptionLabel(pokemon) }));
 const PVP_POKEMON_BY_LABEL = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.label, option.pokemon]));
+const PVP_POKEMON_LABEL_BY_ID = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.pokemon.id, option.label]));
 
 function pokemonNameParts(name: string) {
   const forms = Array.from(name.matchAll(/\(([^)]+)\)/g), (match) => match[1]);
@@ -96,6 +102,69 @@ function pokemonNameParts(name: string) {
     species: name.replace(/\s*\([^)]+\)/g, "").trim(),
     form: forms.length ? forms.join(" · ") : "Normal",
   };
+}
+
+function normalizeScanText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+const SCAN_BASE_NAMES = Array.from(new Set(PVP_POKEMON.map((pokemon) => pokemonNameParts(pokemon.name).species)))
+  .map((name) => ({ name, normalized: normalizeScanText(name) }))
+  .sort((a, b) => b.normalized.length - a.normalized.length);
+
+function editDistance(left: string, right: string) {
+  const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let diagonal = row[0];
+    row[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const above = row[rightIndex];
+      row[rightIndex] = Math.min(
+        row[rightIndex] + 1,
+        row[rightIndex - 1] + 1,
+        diagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+      diagonal = above;
+    }
+  }
+  return row[right.length];
+}
+
+function matchCatalogFromOcr(text: string) {
+  const normalizedText = ` ${normalizeScanText(text)} `;
+  let baseMatch = SCAN_BASE_NAMES.find(({ normalized }) => normalized.length >= 3 && normalizedText.includes(` ${normalized} `));
+
+  if (!baseMatch) {
+    const words = normalizedText.trim().split(/\s+/).filter((word) => word.length >= 4);
+    let fuzzy: { name: string; normalized: string; distance: number } | null = null;
+    for (const candidate of SCAN_BASE_NAMES.filter(({ normalized }) => !normalized.includes(" "))) {
+      for (const word of words) {
+        if (Math.abs(candidate.normalized.length - word.length) > 2) continue;
+        const distance = editDistance(candidate.normalized, word);
+        const limit = Math.max(1, Math.floor(candidate.normalized.length * 0.16));
+        if (distance <= limit && (!fuzzy || distance < fuzzy.distance)) fuzzy = { ...candidate, distance };
+      }
+    }
+    baseMatch = fuzzy ?? undefined;
+  }
+
+  if (!baseMatch) return null;
+  const candidates = PVP_POKEMON.filter((pokemon) => pokemonNameParts(pokemon.name).species === baseMatch.name);
+  return candidates
+    .map((pokemon) => {
+      const formWords = Array.from(pokemon.name.matchAll(/\(([^)]+)\)/g), (match) => normalizeScanText(match[1]));
+      const typeMatches = pokemon.types.filter((type) => type !== "None" && normalizedText.includes(` ${normalizeScanText(type)} `)).length;
+      const formMatches = formWords.filter((form) => normalizedText.includes(` ${form} `)).length;
+      const hasUnseenSpecialForm = formWords.some((form) => !normalizedText.includes(` ${form} `));
+      const score = typeMatches * 8 + formMatches * 16 + (pokemon.name === baseMatch.name ? 10 : 0) - (hasUnseenSpecialForm ? 4 : 0);
+      return { pokemon, score };
+    })
+    .sort((a, b) => b.score - a.score)[0]?.pokemon ?? null;
 }
 
 type SavedTeam = {
@@ -626,7 +695,7 @@ function App() {
       setToast("Choose PNG, JPEG, or WebP screenshots.");
       return;
     }
-    const items = accepted.map((file) => ({
+    const items: ImportItem[] = accepted.map((file) => ({
       id: crypto.randomUUID(),
       fileName: file.name,
       preview: URL.createObjectURL(file),
@@ -635,13 +704,72 @@ function App() {
       chargedMove1: "",
       chargedMove2: "",
       cp: 0,
+      level: 0,
       attackIv: 0,
       defenseIv: 0,
       hpIv: 0,
-      confidence: 38,
+      confidence: 3,
+      scanStatus: "scanning",
+      scanMessage: "Preparing screenshot",
     }));
     setImportQueue((current) => [...current, ...items]);
-    setToast(`${accepted.length} screenshot${accepted.length === 1 ? "" : "s"} ready for review.`);
+    setToast(`Scanning ${accepted.length} screenshot${accepted.length === 1 ? "" : "s"} on this device…`);
+
+    void (async () => {
+      let completed = 0;
+      for (const [index, file] of accepted.entries()) {
+        const item = items[index];
+        try {
+          const scan = await scanAppraisalImage(file, (progress, label) => {
+            updateImport(item.id, { confidence: progress, scanMessage: label });
+          });
+          const catalogPokemon = matchCatalogFromOcr(scan.text);
+          const hasIvs = scan.attackIv !== null && scan.defenseIv !== null && scan.hpIv !== null;
+          const level = catalogPokemon && scan.cp !== null && hasIvs
+            ? inferPokemonLevel(scan.cp, catalogPokemon.baseStats, scan.attackIv!, scan.defenseIv!, scan.hpIv!)
+            : null;
+          const species = catalogPokemon ? PVP_POKEMON_LABEL_BY_ID.get(catalogPokemon.id) ?? "" : "";
+          const missing = [
+            !catalogPokemon && "species",
+            scan.cp === null && "CP",
+            !hasIvs && "IV bars",
+            level === null && "level",
+          ].filter(Boolean) as string[];
+          const fieldConfidence = Math.min(99, Math.round(
+            (catalogPokemon ? 24 : 0)
+            + (scan.cp !== null ? 18 : 0)
+            + (hasIvs ? 36 : 0)
+            + (level !== null ? 14 : 0)
+            + Math.min(7, scan.ocrConfidence * 0.07),
+          ));
+
+          updateImport(item.id, {
+            species,
+            fastMove: catalogPokemon?.fastMoves[0] ?? "",
+            chargedMove1: catalogPokemon?.chargedMoves[0] ?? "",
+            chargedMove2: catalogPokemon?.chargedMoves[1] ?? "",
+            cp: scan.cp ?? 0,
+            level: level ?? 0,
+            attackIv: scan.attackIv ?? 0,
+            defenseIv: scan.defenseIv ?? 0,
+            hpIv: scan.hpIv ?? 0,
+            confidence: fieldConfidence,
+            scanStatus: missing.length ? "needs-review" : "ready",
+            scanMessage: missing.length
+              ? `Check ${missing.join(", ")}`
+              : "Species, CP, IVs, and level read automatically",
+          });
+          completed += 1;
+        } catch (error) {
+          updateImport(item.id, {
+            confidence: 0,
+            scanStatus: "error",
+            scanMessage: error instanceof Error ? `Scan failed: ${error.message}` : "Scan failed; enter fields manually",
+          });
+        }
+      }
+      setToast(`${completed} of ${accepted.length} screenshot${accepted.length === 1 ? "" : "s"} scanned. Confirm the results before saving.`);
+    })();
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -654,16 +782,27 @@ function App() {
     handleFiles(Array.from(event.dataTransfer.files));
   }
 
+  function onPaste(event: ReactClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(event.clipboardData.files);
+    if (!files.length) return;
+    event.preventDefault();
+    handleFiles(files);
+  }
+
   function updateImport(id: string, patch: Partial<ImportItem>) {
     setImportQueue((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
   function approveImports() {
+    if (importQueue.some((item) => item.scanStatus === "scanning")) {
+      setToast("Wait for the local screenshot scan to finish.");
+      return;
+    }
     const valid = importQueue
       .map((item) => ({ item, catalogPokemon: PVP_POKEMON_BY_LABEL.get(item.species) }))
-      .filter((match): match is { item: ImportItem; catalogPokemon: PvpPokemon } => Boolean(match.catalogPokemon && match.item.cp > 0));
+      .filter((match): match is { item: ImportItem; catalogPokemon: PvpPokemon } => Boolean(match.catalogPokemon && match.item.cp > 0 && match.item.level > 0));
     if (!valid.length) {
-      setToast("Choose a Pokémon from the catalog and confirm its CP before saving.");
+      setToast("Confirm the Pokémon, CP, and level before saving.");
       return;
     }
     const additions: Pokemon[] = valid.map(({ item, catalogPokemon }) => {
@@ -675,7 +814,7 @@ function App() {
       species: name.species,
       form: name.form,
       cp: item.cp,
-      level: 20,
+      level: item.level,
       attackIv: item.attackIv,
       defenseIv: item.defenseIv,
       hpIv: item.hpIv,
@@ -878,6 +1017,7 @@ function App() {
               fileInput={fileInput}
               onFileChange={onFileChange}
               onDrop={onDrop}
+              onPaste={onPaste}
               onKeepScreenshots={setKeepScreenshots}
               onUpdate={updateImport}
               onRemove={(id) => setImportQueue((current) => current.filter((item) => item.id !== id))}
@@ -1184,6 +1324,7 @@ function ImportView({
   fileInput,
   onFileChange,
   onDrop,
+  onPaste,
   onKeepScreenshots,
   onUpdate,
   onRemove,
@@ -1194,6 +1335,7 @@ function ImportView({
   fileInput: React.RefObject<HTMLInputElement | null>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
+  onPaste: (event: ReactClipboardEvent<HTMLDivElement>) => void;
   onKeepScreenshots: (value: boolean) => void;
   onUpdate: (id: string, patch: Partial<ImportItem>) => void;
   onRemove: (id: string) => void;
@@ -1201,14 +1343,34 @@ function ImportView({
 }) {
   const sourceDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(pvpokeCatalog.source.sourceUpdatedAt));
 
-  function updateSpecies(itemId: string, value: string) {
+  function updateSpecies(item: ImportItem, value: string) {
     const catalogPokemon = PVP_POKEMON_BY_LABEL.get(value);
-    onUpdate(itemId, {
+    const level = catalogPokemon && item.cp > 0
+      ? inferPokemonLevel(item.cp, catalogPokemon.baseStats, item.attackIv, item.defenseIv, item.hpIv)
+      : null;
+    onUpdate(item.id, {
       species: value,
       confidence: catalogPokemon ? 96 : 38,
       fastMove: catalogPokemon?.fastMoves[0] ?? "",
       chargedMove1: catalogPokemon?.chargedMoves[0] ?? "",
       chargedMove2: catalogPokemon?.chargedMoves[1] ?? "",
+      level: level ?? item.level,
+      scanStatus: catalogPokemon && item.cp > 0 && (level ?? item.level) > 0 ? "ready" : "needs-review",
+      scanMessage: catalogPokemon ? "Catalog match confirmed" : "Choose a released Pokémon form",
+    });
+  }
+
+  function updateDetectedStats(item: ImportItem, patch: Partial<Pick<ImportItem, "cp" | "attackIv" | "defenseIv" | "hpIv">>) {
+    const next = { ...item, ...patch };
+    const catalogPokemon = PVP_POKEMON_BY_LABEL.get(next.species);
+    const level = catalogPokemon && next.cp > 0
+      ? inferPokemonLevel(next.cp, catalogPokemon.baseStats, next.attackIv, next.defenseIv, next.hpIv)
+      : null;
+    onUpdate(item.id, {
+      ...patch,
+      level: level ?? 0,
+      scanStatus: catalogPokemon && next.cp > 0 && level !== null ? "ready" : "needs-review",
+      scanMessage: level !== null ? "Level recalculated from CP and IVs" : "Check the highlighted scan fields",
     });
   }
 
@@ -1220,10 +1382,10 @@ function ImportView({
       </section>
       <div className="import-layout">
         <section className="panel upload-panel">
-          <div className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+          <div className="drop-zone" role="button" tabIndex={0} aria-label="Screenshot drop zone" onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onPaste={onPaste} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInput.current?.click(); }}>
             <div className="upload-symbol">⇧</div>
             <h3>Drop appraisal screenshots here</h3>
-            <p>PNG, JPEG, or WebP · One Pokémon per image</p>
+            <p>PNG, JPEG, or WebP · Drop, choose, or paste screenshots</p>
             <button className="button primary" onClick={() => fileInput.current?.click()}>Choose screenshots</button>
             <input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={onFileChange} hidden />
           </div>
@@ -1240,26 +1402,26 @@ function ImportView({
                 {items.map((item, index) => {
                   const catalogPokemon = PVP_POKEMON_BY_LABEL.get(item.species);
                   const displayName = catalogPokemon ? pokemonNameParts(catalogPokemon.name) : null;
-                  return <article className={`review-item ${catalogPokemon ? "catalog-confirmed" : ""}`} key={item.id}>
+                  return <article className={`review-item ${catalogPokemon ? "catalog-confirmed" : ""} ${item.scanStatus === "scanning" ? "is-scanning" : ""}`} key={item.id}>
                     {/* Blob previews are local-only and cannot use the Next image optimizer. */}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={item.preview} alt={`Appraisal preview for ${item.fileName}`} />
                     <div className="review-fields">
-                      <div className="review-title"><span>#{String(index + 1).padStart(2, "0")}</span><strong>{item.fileName}</strong><button onClick={() => onRemove(item.id)} aria-label={`Remove ${item.fileName}`}>×</button></div>
+                      <div className="review-title"><span>#{String(index + 1).padStart(2, "0")}</span><strong>{item.fileName}</strong><em className={`scan-state ${item.scanStatus}`}>{item.scanStatus === "scanning" ? `${item.confidence}% SCANNING` : item.scanStatus === "ready" ? "READ" : "CHECK"}</em><button onClick={() => onRemove(item.id)} aria-label={`Remove ${item.fileName}`}>×</button></div>
                       <div className="field-row">
-                        <label className="species-search-field">Pokémon & form<input list="pvpoke-species-options" value={item.species} onChange={(event) => updateSpecies(item.id, event.target.value)} placeholder={`Search ${pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms…`} /></label>
-                        <NumberInput label="CP" value={item.cp} max={10000} onChange={(value) => onUpdate(item.id, { cp: value })} />
+                        <label className="species-search-field">Pokémon & form<input list="pvpoke-species-options" value={item.species} disabled={item.scanStatus === "scanning"} onChange={(event) => updateSpecies(item, event.target.value)} placeholder={`Search ${pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms…`} /></label>
+                        <NumberInput label="CP" value={item.cp} max={10000} disabled={item.scanStatus === "scanning"} onChange={(value) => updateDetectedStats(item, { cp: value })} />
                       </div>
                       {catalogPokemon && displayName && <div className="catalog-match"><span className="catalog-check">✓</span><div><strong>{displayName.species}</strong><span>#{String(catalogPokemon.dex).padStart(4, "0")} · {displayName.form}</span></div><TypeList types={catalogPokemon.types} /><div className="base-stat-line"><span>ATK <b>{catalogPokemon.baseStats.atk}</b></span><span>DEF <b>{catalogPokemon.baseStats.def}</b></span><span>HP <b>{catalogPokemon.baseStats.hp}</b></span></div></div>}
-                      <div className="iv-field-row"><NumberInput label="Attack IV" value={item.attackIv} max={15} onChange={(value) => onUpdate(item.id, { attackIv: value })} /><NumberInput label="Defense IV" value={item.defenseIv} max={15} onChange={(value) => onUpdate(item.id, { defenseIv: value })} /><NumberInput label="HP IV" value={item.hpIv} max={15} onChange={(value) => onUpdate(item.id, { hpIv: value })} /></div>
+                      <div className="iv-field-row"><NumberInput label="Attack IV" value={item.attackIv} max={15} disabled={item.scanStatus === "scanning"} onChange={(value) => updateDetectedStats(item, { attackIv: value })} /><NumberInput label="Defense IV" value={item.defenseIv} max={15} disabled={item.scanStatus === "scanning"} onChange={(value) => updateDetectedStats(item, { defenseIv: value })} /><NumberInput label="HP IV" value={item.hpIv} max={15} disabled={item.scanStatus === "scanning"} onChange={(value) => updateDetectedStats(item, { hpIv: value })} /><NumberInput label="Level" value={item.level} min={1} max={51} step={0.5} disabled={item.scanStatus === "scanning"} onChange={(value) => onUpdate(item.id, { level: value, scanStatus: value > 0 ? "ready" : "needs-review" })} /></div>
                       {catalogPokemon && <div className="move-field-row"><label>Fast move<select value={item.fastMove} onChange={(event) => onUpdate(item.id, { fastMove: event.target.value })}>{catalogPokemon.fastMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label><label>Charged move 1<select value={item.chargedMove1} onChange={(event) => onUpdate(item.id, { chargedMove1: event.target.value })}>{catalogPokemon.chargedMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label><label>Charged move 2<select value={item.chargedMove2} onChange={(event) => onUpdate(item.id, { chargedMove2: event.target.value })}><option value="">Not unlocked</option>{catalogPokemon.chargedMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label></div>}
-                      <div className="confidence-line"><span>Field confidence</span><i><b style={{ width: `${item.confidence}%` }} /></i><strong>{item.confidence}%</strong></div>
+                      <div className="confidence-line"><span>{item.scanMessage}</span><i><b style={{ width: `${item.confidence}%` }} /></i><strong>{item.confidence}%</strong></div>
                     </div>
                   </article>;
                 })}
               </div>
               <datalist id="pvpoke-species-options">{PVP_POKEMON_OPTIONS.map(({ pokemon, label }) => <option value={label} key={pokemon.id}>{pokemon.types.join(" / ")}</option>)}</datalist>
-              <div className="review-footer"><p><span>!</span> Every entry needs a catalog match and CP.</p><button className="button primary" onClick={onApprove}>Approve confirmed entries</button></div>
+              <div className="review-footer"><p><span>!</span> Confirm the automatic species, CP, IV, and level reading.</p><button className="button primary" disabled={items.some((item) => item.scanStatus === "scanning")} onClick={onApprove}>{items.some((item) => item.scanStatus === "scanning") ? "Scanning screenshots…" : "Approve confirmed entries"}</button></div>
             </>
           ) : (
             <EmptyState icon="▧" title="Your review queue is clear" text={`Add appraisal screenshots to match against ${pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms. Nothing is saved until you approve it.`} />
@@ -1462,8 +1624,8 @@ function ProcessStep({ n, title, detail }: { n: string; title: string; detail: s
   return <div className="process-step"><span>{n}</span><div><strong>{title}</strong><small>{detail}</small></div></div>;
 }
 
-function NumberInput({ label, value, max, onChange }: { label: string; value: number; max: number; onChange: (value: number) => void }) {
-  return <label>{label}<input type="number" min={0} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>;
+function NumberInput({ label, value, min = 0, max, step = 1, disabled = false, onChange }: { label: string; value: number; min?: number; max: number; step?: number; disabled?: boolean; onChange: (value: number) => void }) {
+  return <label>{label}<input type="number" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
 function EmptyState({ icon, title, text, action }: { icon: string; title: string; text: string; action?: ReactNode }) {
