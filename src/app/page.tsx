@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import pvpokeCatalog from "@/data/pvpoke-catalog.json";
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
@@ -27,6 +28,7 @@ const TRAINER_TEAMS: TrainerTeam[] = ["Mystic", "Valor", "Instinct", "Unaffiliat
 
 type Pokemon = {
   id: string;
+  catalogId?: string;
   species: string;
   form: string;
   cp: number;
@@ -54,12 +56,47 @@ type ImportItem = {
   fileName: string;
   preview: string;
   species: string;
+  fastMove: string;
+  chargedMove1: string;
+  chargedMove2: string;
   cp: number;
   attackIv: number;
   defenseIv: number;
   hpIv: number;
   confidence: number;
 };
+
+type PvpPokemon = {
+  id: string;
+  dex: number;
+  name: string;
+  types: string[];
+  baseStats: { atk: number; def: number; hp: number };
+  fastMoves: string[];
+  chargedMoves: string[];
+  eliteMoves: string[];
+  tags: string[];
+};
+
+const PVP_POKEMON = pvpokeCatalog.pokemon as PvpPokemon[];
+const PVP_NAME_COUNTS = new Map<string, number>();
+for (const pokemon of PVP_POKEMON) PVP_NAME_COUNTS.set(pokemon.name, (PVP_NAME_COUNTS.get(pokemon.name) ?? 0) + 1);
+
+function pokemonOptionLabel(pokemon: PvpPokemon) {
+  const duplicateSuffix = (PVP_NAME_COUNTS.get(pokemon.name) ?? 0) > 1 ? ` · ${pokemon.id}` : "";
+  return `${pokemon.name} · #${String(pokemon.dex).padStart(4, "0")}${duplicateSuffix}`;
+}
+
+const PVP_POKEMON_OPTIONS = PVP_POKEMON.map((pokemon) => ({ pokemon, label: pokemonOptionLabel(pokemon) }));
+const PVP_POKEMON_BY_LABEL = new Map(PVP_POKEMON_OPTIONS.map((option) => [option.label, option.pokemon]));
+
+function pokemonNameParts(name: string) {
+  const forms = Array.from(name.matchAll(/\(([^)]+)\)/g), (match) => match[1]);
+  return {
+    species: name.replace(/\s*\([^)]+\)/g, "").trim(),
+    form: forms.length ? forms.join(" · ") : "Normal",
+  };
+}
 
 type SavedTeam = {
   id: string;
@@ -401,20 +438,6 @@ const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "teams", label: "Saved Teams", icon: "▱" },
 ];
 
-const SPECIES_OPTIONS = [
-  "Feraligatr",
-  "Clodsire",
-  "Primeape",
-  "Dunsparce",
-  "Azumarill",
-  "Malamar",
-  "Giratina",
-  "Talonflame",
-  "Dialga",
-  "Zacian",
-  "Necrozma",
-];
-
 const COVERAGE: Record<League, { strengths: string[]; threats: string[]; targets: string[] }> = {
   GL: {
     strengths: ["Steel", "Ghost", "Ground", "Rock"],
@@ -608,6 +631,9 @@ function App() {
       fileName: file.name,
       preview: URL.createObjectURL(file),
       species: "",
+      fastMove: "",
+      chargedMove1: "",
+      chargedMove2: "",
       cp: 0,
       attackIv: 0,
       defenseIv: 0,
@@ -633,34 +659,42 @@ function App() {
   }
 
   function approveImports() {
-    const valid = importQueue.filter((item) => item.species && item.cp > 0);
+    const valid = importQueue
+      .map((item) => ({ item, catalogPokemon: PVP_POKEMON_BY_LABEL.get(item.species) }))
+      .filter((match): match is { item: ImportItem; catalogPokemon: PvpPokemon } => Boolean(match.catalogPokemon && match.item.cp > 0));
     if (!valid.length) {
-      setToast("Confirm a species and CP before saving.");
+      setToast("Choose a Pokémon from the catalog and confirm its CP before saving.");
       return;
     }
-    const additions: Pokemon[] = valid.map((item) => ({
+    const additions: Pokemon[] = valid.map(({ item, catalogPokemon }) => {
+      const name = pokemonNameParts(catalogPokemon.name);
+      const chargedMoves = [item.chargedMove1 || "Select move", item.chargedMove2 || "Not unlocked"];
+      return {
       id: item.id,
-      species: item.species,
-      form: "Normal",
+      catalogId: catalogPokemon.id,
+      species: name.species,
+      form: name.form,
       cp: item.cp,
       level: 20,
       attackIv: item.attackIv,
       defenseIv: item.defenseIv,
       hpIv: item.hpIv,
-      fastMove: "Select move",
-      chargedMoves: ["Select move", "Not unlocked"],
+      fastMove: item.fastMove || "Select move",
+      chargedMoves,
       recommendedMoves: [],
-      types: ["Normal"],
+      types: catalogPokemon.types,
       rating: 70,
       rank: 0,
       role: "Needs analysis",
       leagues: item.cp <= 1500 ? ["GL"] : item.cp <= 2500 ? ["UL"] : ["ML"],
       ready: false,
       favorite: false,
+      shadow: catalogPokemon.tags.includes("shadow") || catalogPokemon.id.endsWith("_shadow"),
+      elite: [item.fastMove, ...chargedMoves].some((move) => catalogPokemon.eliteMoves.includes(move)),
       owned: true,
-    }));
+    }});
     setCollection((current) => [...additions, ...current]);
-    setImportQueue((current) => current.filter((item) => !valid.some((validItem) => validItem.id === item.id)));
+    setImportQueue((current) => current.filter((item) => !valid.some((validItem) => validItem.item.id === item.id)));
     setToast(`${additions.length} confirmed Pokémon added to your collection.`);
     navigate("collection");
   }
@@ -1165,10 +1199,23 @@ function ImportView({
   onRemove: (id: string) => void;
   onApprove: () => void;
 }) {
+  const sourceDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(pvpokeCatalog.source.sourceUpdatedAt));
+
+  function updateSpecies(itemId: string, value: string) {
+    const catalogPokemon = PVP_POKEMON_BY_LABEL.get(value);
+    onUpdate(itemId, {
+      species: value,
+      confidence: catalogPokemon ? 96 : 38,
+      fastMove: catalogPokemon?.fastMoves[0] ?? "",
+      chargedMove1: catalogPokemon?.chargedMoves[0] ?? "",
+      chargedMove2: catalogPokemon?.chargedMoves[1] ?? "",
+    });
+  }
+
   return (
     <>
       <section className="import-hero panel">
-        <div><span className="section-eyebrow">BATCH APPRAISAL IMPORT</span><h2>Turn screenshots into roster records.</h2><p>Drop one appraisal screenshot per Pokémon. Pogo PVP Pro prepares uncertain fields for your confirmation before anything is saved.</p></div>
+        <div className="import-hero-copy"><span className="section-eyebrow">BATCH APPRAISAL IMPORT</span><h2>Turn screenshots into complete battle records.</h2><p>Match every appraisal to the full Pokémon GO battle catalog, confirm its form and legal moves, then save it directly to your private roster.</p><div className="catalog-summary"><span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")}</strong> released forms</span><span><strong>{pvpokeCatalog.source.pokedexCount}</strong> Pokédex species</span><a href={pvpokeCatalog.source.repository} target="_blank" rel="noreferrer">PvPoke data · {sourceDate} ↗</a></div></div>
         <div className="privacy-chip"><span>◉</span><div><strong>Private by default</strong><p>Images stay on this device unless you choose otherwise.</p></div></div>
       </section>
       <div className="import-layout">
@@ -1181,35 +1228,41 @@ function ImportView({
             <input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={onFileChange} hidden />
           </div>
           <Switch label="Keep compressed screenshots" detail="Off by default for privacy" checked={keepScreenshots} onChange={onKeepScreenshots} />
-          <div className="process-steps"><ProcessStep n="1" title="Local scan" detail="Crop and read visible fields" /><ProcessStep n="2" title="Quick review" detail="Confirm uncertain values" /><ProcessStep n="3" title="Save builds" detail="Choose legal moves afterward" /></div>
+          <div className="process-steps"><ProcessStep n="1" title="Local scan" detail="Read visible appraisal fields" /><ProcessStep n="2" title="Catalog match" detail="Choose species, form, and moves" /><ProcessStep n="3" title="Cloud save" detail="Add the confirmed build to your roster" /></div>
+          <div className="catalog-note"><span>DATA</span><p><strong>Full battle-form coverage</strong>Regional, alternate, Mega, and Shadow variants are included. Cosmetic costumes share their base PvP build.</p></div>
         </section>
 
         <section className="panel review-panel">
-          <PanelHeader eyebrow="REVIEW QUEUE" title={items.length ? `${items.length} waiting for confirmation` : "Nothing waiting yet"} action={items.length ? <span className="low-confidence">● LOW CONFIDENCE</span> : undefined} />
+          <PanelHeader eyebrow="REVIEW QUEUE" title={items.length ? `${items.length} waiting for confirmation` : "Nothing waiting yet"} action={items.length ? <span className="low-confidence">● NEEDS REVIEW</span> : undefined} />
           {items.length ? (
             <>
               <div className="review-list">
-                {items.map((item, index) => (
-                  <article className="review-item" key={item.id}>
+                {items.map((item, index) => {
+                  const catalogPokemon = PVP_POKEMON_BY_LABEL.get(item.species);
+                  const displayName = catalogPokemon ? pokemonNameParts(catalogPokemon.name) : null;
+                  return <article className={`review-item ${catalogPokemon ? "catalog-confirmed" : ""}`} key={item.id}>
                     {/* Blob previews are local-only and cannot use the Next image optimizer. */}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={item.preview} alt={`Appraisal preview for ${item.fileName}`} />
                     <div className="review-fields">
                       <div className="review-title"><span>#{String(index + 1).padStart(2, "0")}</span><strong>{item.fileName}</strong><button onClick={() => onRemove(item.id)} aria-label={`Remove ${item.fileName}`}>×</button></div>
                       <div className="field-row">
-                        <label>Species<select value={item.species} onChange={(event) => onUpdate(item.id, { species: event.target.value, confidence: 92 })}><option value="">Confirm species…</option>{SPECIES_OPTIONS.map((species) => <option key={species}>{species}</option>)}</select></label>
+                        <label className="species-search-field">Pokémon & form<input list="pvpoke-species-options" value={item.species} onChange={(event) => updateSpecies(item.id, event.target.value)} placeholder={`Search ${pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms…`} /></label>
                         <NumberInput label="CP" value={item.cp} max={10000} onChange={(value) => onUpdate(item.id, { cp: value })} />
                       </div>
+                      {catalogPokemon && displayName && <div className="catalog-match"><span className="catalog-check">✓</span><div><strong>{displayName.species}</strong><span>#{String(catalogPokemon.dex).padStart(4, "0")} · {displayName.form}</span></div><TypeList types={catalogPokemon.types} /><div className="base-stat-line"><span>ATK <b>{catalogPokemon.baseStats.atk}</b></span><span>DEF <b>{catalogPokemon.baseStats.def}</b></span><span>HP <b>{catalogPokemon.baseStats.hp}</b></span></div></div>}
                       <div className="iv-field-row"><NumberInput label="Attack IV" value={item.attackIv} max={15} onChange={(value) => onUpdate(item.id, { attackIv: value })} /><NumberInput label="Defense IV" value={item.defenseIv} max={15} onChange={(value) => onUpdate(item.id, { defenseIv: value })} /><NumberInput label="HP IV" value={item.hpIv} max={15} onChange={(value) => onUpdate(item.id, { hpIv: value })} /></div>
+                      {catalogPokemon && <div className="move-field-row"><label>Fast move<select value={item.fastMove} onChange={(event) => onUpdate(item.id, { fastMove: event.target.value })}>{catalogPokemon.fastMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label><label>Charged move 1<select value={item.chargedMove1} onChange={(event) => onUpdate(item.id, { chargedMove1: event.target.value })}>{catalogPokemon.chargedMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label><label>Charged move 2<select value={item.chargedMove2} onChange={(event) => onUpdate(item.id, { chargedMove2: event.target.value })}><option value="">Not unlocked</option>{catalogPokemon.chargedMoves.map((move) => <option value={move} key={move}>{move}{catalogPokemon.eliteMoves.includes(move) ? " · Elite" : ""}</option>)}</select></label></div>}
                       <div className="confidence-line"><span>Field confidence</span><i><b style={{ width: `${item.confidence}%` }} /></i><strong>{item.confidence}%</strong></div>
                     </div>
-                  </article>
-                ))}
+                  </article>;
+                })}
               </div>
-              <div className="review-footer"><p><span>!</span> Every entry needs a species and CP.</p><button className="button primary" onClick={onApprove}>Approve confirmed entries</button></div>
+              <datalist id="pvpoke-species-options">{PVP_POKEMON_OPTIONS.map(({ pokemon, label }) => <option value={label} key={pokemon.id}>{pokemon.types.join(" / ")}</option>)}</datalist>
+              <div className="review-footer"><p><span>!</span> Every entry needs a catalog match and CP.</p><button className="button primary" onClick={onApprove}>Approve confirmed entries</button></div>
             </>
           ) : (
-            <EmptyState icon="▧" title="Your review queue is clear" text="Add appraisal screenshots to start a batch. Nothing is saved until you approve it." />
+            <EmptyState icon="▧" title="Your review queue is clear" text={`Add appraisal screenshots to match against ${pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms. Nothing is saved until you approve it.`} />
           )}
         </section>
       </div>
@@ -1349,7 +1402,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={50} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>League rankings, matchups, and recommended moves are currently sample planning data. A future production data pipeline should pin and attribute its PvPoke and Pokémon GO Game Master-derived sources.</p><div><span>APP VERSION</span><strong>0.2 · Accounts</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>ORIGINAL IMAGES</span><strong>{keepScreenshots ? "Retained locally" : "Not retained"}</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, and legal moves are pinned to the attributed PvPoke catalog. Team ratings and matchup recommendations remain sample planning data until the ranking pipeline is connected.</p><div><span>APP VERSION</span><strong>0.3 · Full catalog</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div></div></section>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "pogo-pvp-pro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node --env-file=.env.local scripts/migrate.mjs"
+    "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "data:sync": "node scripts/sync-pvpoke-data.mjs",
+    "data:validate": "node scripts/validate-pvpoke-data.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

@@ -43,6 +43,7 @@ const leagueSchema = z.enum(["GL", "UL", "ML"]);
 const pokemonSchema = z
   .object({
     id: z.string().min(1).max(100),
+    catalogId: z.string().min(1).max(100).optional(),
     species: z.string().min(1).max(80),
     form: z.string().max(80),
     cp: z.number().int().min(0).max(10000),
