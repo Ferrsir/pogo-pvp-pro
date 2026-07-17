@@ -96,19 +96,19 @@ button:disabled {
   text-align: left;
 }
 
-.brand > span:last-child {
+.brand-product {
   display: flex;
   flex-direction: column;
 }
 
-.brand strong {
+.brand-product strong {
   font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1.1;
 }
 
-.brand em {
+.brand-product em {
   color: var(--blue);
   font-size: 9px;
   font-style: normal;
@@ -117,72 +117,108 @@ button:disabled {
   margin-top: 4px;
 }
 
-.brand-mark {
-  background: linear-gradient(145deg, #52b3ff, #2175ce);
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px rgba(73, 167, 255, 0.08), 0 8px 22px rgba(29, 117, 199, 0.25);
-  display: block;
-  height: 38px;
+.pokemon-go-logo {
+  --go-ball-size: 26px;
+  --go-letter-size: 29px;
+  --pokemon-letter-size: 12px;
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  filter: drop-shadow(0 7px 12px rgba(3, 9, 20, 0.38));
+  height: 48px;
+  justify-content: center;
+  line-height: 0.78;
   position: relative;
-  width: 38px;
+  width: 72px;
 }
 
-.brand-mark::before,
-.brand-mark::after {
-  background: #0d1825;
+.pokemon-go-word {
+  color: #ffd84c;
+  font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
+  font-size: var(--pokemon-letter-size);
+  font-weight: 900;
+  letter-spacing: -0.045em;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 #12376f, 0 0 8px rgba(87, 174, 255, 0.45);
+  transform: skew(-4deg) scaleX(1.08);
+  -webkit-text-stroke: 1px #2762b2;
+  z-index: 2;
+}
+
+.pokemon-go-go {
+  align-items: center;
+  display: flex;
+  height: var(--go-ball-size);
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.pokemon-go-go b {
+  background: linear-gradient(180deg, #b8e7ff 5%, #5bb8ff 47%, #2875cd 95%);
+  background-clip: text;
+  color: transparent;
+  font-family: Impact, Haettenschweiler, "Arial Black", sans-serif;
+  font-size: var(--go-letter-size);
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  line-height: 0.8;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 rgba(5, 26, 64, 0.75);
+  -webkit-background-clip: text;
+  -webkit-text-stroke: 1.5px #17458d;
+}
+
+.pokemon-go-go i {
+  background: linear-gradient(180deg, #65c5ff 0 44%, #17437b 45% 54%, #eef9ff 55% 100%);
+  border: 2px solid #17458d;
+  border-radius: 50%;
+  box-shadow: inset 0 0 9px rgba(255, 255, 255, 0.32), 0 0 9px rgba(73, 167, 255, 0.25);
+  box-sizing: border-box;
+  height: var(--go-ball-size);
+  margin-left: -1px;
+  position: relative;
+  width: var(--go-ball-size);
+}
+
+.pokemon-go-go i::before {
+  background: #17437b;
   content: "";
-  left: 4px;
+  height: 10%;
+  left: 0;
   position: absolute;
-  right: 4px;
+  right: 0;
+  top: 45%;
 }
 
-.brand-mark::before {
-  height: 4px;
-  top: 17px;
-}
-
-.brand-mark::after {
+.pokemon-go-go i::after {
+  background: #dff5ff;
+  border: 2px solid #17437b;
   border-radius: 50%;
-  height: 12px;
-  left: 13px;
-  outline: 3px solid #0d1825;
-  right: auto;
-  top: 13px;
-  width: 12px;
-}
-
-.brand-mark i {
-  background: #d9f2ff;
-  border-radius: 50%;
-  height: 4px;
-  left: 17px;
+  box-sizing: border-box;
+  content: "";
+  height: 36%;
+  left: 32%;
   position: absolute;
-  top: 17px;
-  width: 4px;
-  z-index: 1;
+  top: 32%;
+  width: 36%;
 }
 
-.brand-mark.small {
-  height: 30px;
-  width: 30px;
+.pokemon-go-logo-small {
+  --go-ball-size: 19px;
+  --go-letter-size: 21px;
+  --pokemon-letter-size: 8px;
+  height: 34px;
+  width: 50px;
 }
 
-.brand-mark.small::before {
-  height: 3px;
-  top: 14px;
-}
-
-.brand-mark.small::after {
-  height: 9px;
-  left: 11px;
-  outline-width: 2px;
-  top: 11px;
-  width: 9px;
-}
-
-.brand-mark.small i {
-  left: 14px;
-  top: 14px;
+.pokemon-go-logo-hero {
+  --go-ball-size: 36px;
+  --go-letter-size: 42px;
+  --pokemon-letter-size: 16px;
+  height: 70px;
+  width: 100px;
 }
 
 .workspace-label,
@@ -668,63 +704,30 @@ button:disabled {
 }
 
 .battle-core {
+  align-items: center;
   background: linear-gradient(145deg, rgba(54, 149, 233, 0.24), rgba(11, 31, 48, 0.8));
   border: 1px solid rgba(107, 190, 255, 0.45);
   border-radius: 50%;
   box-shadow: 0 0 55px rgba(29, 124, 211, 0.23), inset 0 0 30px rgba(73, 167, 255, 0.09);
-  height: 118px;
+  display: flex;
+  height: 126px;
+  justify-content: center;
   left: 50%;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 118px;
-}
-
-.battle-core::before,
-.battle-core::after {
-  background: #75c4ff;
-  content: "";
-  left: 10px;
-  position: absolute;
-  right: 10px;
+  width: 126px;
 }
 
 .battle-core::before {
-  height: 4px;
-  top: 57px;
-}
-
-.battle-core::after {
-  border: 6px solid #75c4ff;
+  border: 1px solid rgba(117, 196, 255, 0.22);
   border-radius: 50%;
-  height: 32px;
-  left: 43px;
-  right: auto;
-  top: 40px;
-  width: 32px;
-}
-
-.battle-core span {
-  background: #0d1b29;
-  border-radius: 50%;
-  height: 18px;
-  left: 50px;
+  content: "";
+  inset: 8px;
   position: absolute;
-  top: 50px;
-  width: 18px;
-  z-index: 1;
 }
 
-.battle-core i {
-  background: #c7edff;
-  border-radius: 50%;
-  height: 6px;
-  left: 56px;
-  position: absolute;
-  top: 56px;
-  width: 6px;
-  z-index: 2;
-}
+.battle-core .pokemon-go-logo { z-index: 1; }
 
 .orbit-chip {
   align-items: center;

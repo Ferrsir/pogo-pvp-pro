@@ -1169,8 +1169,8 @@ function App() {
     <div className={`app-shell ${compactMode ? "is-compact" : ""}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("dashboard")} aria-label="Pogo PVP Pro home">
-          <span className="brand-mark" aria-hidden="true"><i /></span>
-          <span><strong>Pogo PVP</strong><em>PRO</em></span>
+          <PokemonGoLogo size="brand" />
+          <span className="brand-product"><strong>PVP</strong><em>PRO</em></span>
         </button>
 
         <div className="workspace-label">BATTLE WORKSPACE</div>
@@ -1203,8 +1203,8 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           <div className="mobile-brand">
-            <span className="brand-mark small" aria-hidden="true"><i /></span>
-            <strong>Pogo PVP Pro</strong>
+            <PokemonGoLogo size="small" />
+            <strong>PVP Pro</strong>
           </div>
           <div className="topbar-copy">
             <p>{getEyebrow(view)}</p>
@@ -1367,10 +1367,10 @@ function Dashboard({
         <div className="hero-orbit" aria-hidden="true">
           <div className="orbit orbit-one" />
           <div className="orbit orbit-two" />
-          <div className="battle-core"><span /><i /></div>
+          <div className="battle-core"><PokemonGoLogo size="hero" /></div>
           <div className="orbit-chip chip-one">IV</div>
           <div className="orbit-chip chip-two">CP</div>
-          <div className="orbit-chip chip-three">3×</div>
+          <div className="orbit-chip chip-three">HP</div>
         </div>
       </section>
 
@@ -2021,8 +2021,8 @@ function AuthScreen({ initialError, onAuthenticated }: { initialError: string; o
     <main className="auth-shell">
       <section className="auth-story">
         <button className="brand auth-brand" aria-label="Pogo PVP Pro">
-          <span className="brand-mark" aria-hidden="true"><i /></span>
-          <span><strong>Pogo PVP</strong><em>PRO</em></span>
+          <PokemonGoLogo size="brand" />
+          <span className="brand-product"><strong>PVP</strong><em>PRO</em></span>
         </button>
         <div className="auth-copy">
           <span className="kicker"><i /> YOUR ROSTER. YOUR ACCOUNT.</span>
@@ -2034,7 +2034,7 @@ function AuthScreen({ initialError, onAuthenticated }: { initialError: string; o
             <div><span>03</span><p><strong>No email required</strong>Just choose a username and password.</p></div>
           </div>
         </div>
-        <div className="auth-visual" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="battle-core"><span /><i /></div></div>
+        <div className="auth-visual" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="battle-core"><PokemonGoLogo size="hero" /></div></div>
       </section>
 
       <section className="auth-card-wrap">
@@ -2092,7 +2092,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.8.1 · Exact IV ranks</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog. Team-builder lineup scores remain planning guidance rather than new on-demand simulations.</p><div><span>APP VERSION</span><strong>0.9 · Pokémon GO branding</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.mappedEntries.toLocaleString("en-US")} mapped entries</strong></div></div></section>
     </div>
   );
 }
@@ -2116,6 +2116,15 @@ function MiniMember({ pokemon, role, index }: { pokemon: Pokemon; role: string; 
 function MemberCard({ pokemon, role, league, locked, manual = false, onLock }: { pokemon: Pokemon; role: string; league: League; locked: boolean; manual?: boolean; onLock: () => void }) {
   const rank = pokemonPvpIvRank(pokemon, league);
   return <article className={`member-card ${manual ? "manual" : ""}`}><div className="member-card-top"><span className="role-label">{role.toUpperCase()}</span><button className={manual ? "remove" : locked ? "locked" : ""} onClick={onLock}>{manual ? "× REMOVE" : locked ? "◆ LOCKED" : "◇ LOCK"}</button></div><PokemonMark pokemon={pokemon} size="large" /><h3>{pokemon.species}</h3><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Lv {pokemon.level}</p><TypeList types={pokemon.types} /><div className="move-list"><div><span>FAST</span><strong>{pokemon.fastMove}</strong></div>{pokemon.chargedMoves.map((move, index) => <div key={move}><span>CHG {index + 1}</span><strong>{move}</strong></div>)}</div><div className="member-meta"><span>IV <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><span>Rank <b>#{rank?.toLocaleString() ?? "—"}</b></span>{!pokemon.owned && <em>NOT OWNED</em>}</div></article>;
+}
+
+function PokemonGoLogo({ size = "brand" }: { size?: "small" | "brand" | "hero" }) {
+  return (
+    <span className={`pokemon-go-logo pokemon-go-logo-${size}`} aria-hidden="true">
+      <span className="pokemon-go-word">POKÉMON</span>
+      <span className="pokemon-go-go"><b>G</b><i /></span>
+    </span>
+  );
 }
 
 function PokemonMark({ pokemon, size = "medium" }: { pokemon: Pokemon; size?: "small" | "medium" | "large" }) {

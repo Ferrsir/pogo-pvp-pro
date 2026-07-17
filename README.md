@@ -8,6 +8,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 ## Included in this version
 
 - Command Center with roster health and league readiness
+- Pokémon GO-inspired vector branding across the app shell, sign-in screen, and dashboard battle orbit
 - Searchable Great, Ultra, and Master League collection view
 - Click any roster entry to open a complete PvP battle file
 - Edit a saved Pokémon's CP, level, fast move, and charged moves from its collection battle file
