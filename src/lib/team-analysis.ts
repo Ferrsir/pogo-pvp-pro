@@ -72,6 +72,10 @@ export type TeamCoverageRow = {
   type: string;
   value: number;
   detail: string;
+  answers?: Array<{
+    pokemonId: string;
+    moveNames: string[];
+  }>;
 };
 
 export type TeamMetaTarget = {
@@ -207,9 +211,21 @@ function effectiveness(attackType: string, defenseTypes: string[]) {
 }
 
 function currentMoveTypes(pokemon: TeamPokemonInput, fallbackTypes: string[]) {
-  const moveTypes = [pokemon.fastMove, ...pokemon.chargedMoves]
-    .flatMap((move) => MOVES_BY_NAME.get(move)?.map((variant) => variant.type) ?? []);
+  const moveTypes = currentCoverageMoves(pokemon).map((move) => move.type);
   return [...new Set(moveTypes.length ? moveTypes : fallbackTypes.slice(0, 1))];
+}
+
+function currentCoverageMoves(pokemon: TeamPokemonInput) {
+  const seen = new Set<string>();
+  return [pokemon.fastMove, ...pokemon.chargedMoves]
+    .filter((move) => move && move !== "Not unlocked")
+    .flatMap((move) => MOVES_BY_NAME.get(move)?.map((variant) => ({ name: move, type: variant.type })) ?? [])
+    .filter((move) => {
+      const key = `${move.name}|${move.type}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function rankingForPokemon(pokemon: TeamPokemonInput, rankings: TeamRankingsData, league: AnalysisLeague) {
@@ -362,7 +378,8 @@ export function analyzeTeam(
     const catalogPokemon = catalogPokemonForTeam(pokemon);
     const types = catalogPokemon?.types ?? pokemon.types;
     const profile = memberRoleProfile(pokemon, league, rankings);
-    return { pokemon, profile, types, moveTypes: currentMoveTypes(pokemon, types) };
+    const coverageMoves = currentCoverageMoves(pokemon);
+    return { pokemon, profile, types, coverageMoves, moveTypes: currentMoveTypes(pokemon, types) };
   });
 
   const metaStrength = Math.round(memberData.reduce((sum, member) => sum + member.profile.metaScore, 0) / team.length);
@@ -370,10 +387,16 @@ export function analyzeTeam(
 
   const offense = ATTACK_TYPES.map((defenseType) => {
     const memberMultipliers = memberData.map((member) => Math.max(...member.moveTypes.map((moveType) => effectiveness(moveType, [defenseType])), 1));
-    const superEffectiveAnswers = memberMultipliers.filter((multiplier) => multiplier > 1.01).length;
+    const answers = memberData.flatMap((member) => {
+      const moveNames = [...new Set(member.coverageMoves
+        .filter((move) => effectiveness(move.type, [defenseType]) > 1.01)
+        .map((move) => move.name))];
+      return moveNames.length ? [{ pokemonId: member.pokemon.id, moveNames }] : [];
+    });
+    const superEffectiveAnswers = answers.length;
     const best = Math.max(...memberMultipliers);
     const value = best > 1.01 ? clamp(72 + superEffectiveAnswers * 8 + (best >= 2.5 ? 8 : 0)) : best < 0.99 ? 24 : 50;
-    return { type: defenseType, value: Math.round(value), detail: superEffectiveAnswers ? `${superEffectiveAnswers} equipped answer${superEffectiveAnswers === 1 ? "" : "s"}` : "neutral pressure" };
+    return { type: defenseType, value: Math.round(value), detail: superEffectiveAnswers ? `${superEffectiveAnswers} equipped answer${superEffectiveAnswers === 1 ? "" : "s"}` : "neutral pressure", answers };
   }).sort((left, right) => right.value - left.value || left.type.localeCompare(right.type));
 
   let weaknessSlots = 0;

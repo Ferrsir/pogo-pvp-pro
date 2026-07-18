@@ -37,6 +37,12 @@ const analyses = [0, 3, 6, 9].map((start) => {
   }
   if (analysis.roles.map((role) => role.role).join("|") !== "Lead|Safe switch|Closer") throw new Error("Role assignment is incomplete.");
   if (new Set(analysis.roles.map((role) => role.pokemonId)).size !== 3) throw new Error("A Pokémon was assigned to more than one role.");
+  for (const coverage of analysis.offense) {
+    if (coverage.detail.includes("equipped answer") && !coverage.answers?.length) throw new Error(`Coverage for ${coverage.type} is missing its answer Pokémon.`);
+    for (const answer of coverage.answers ?? []) {
+      if (!team.some((pokemon) => pokemon.id === answer.pokemonId) || !answer.moveNames.length) throw new Error(`Coverage for ${coverage.type} points to an invalid team answer.`);
+    }
+  }
   return analysis;
 });
 

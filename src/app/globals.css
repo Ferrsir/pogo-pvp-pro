@@ -2889,6 +2889,61 @@ button:disabled {
 .coverage-row.danger > b i { background: var(--red); }
 .coverage-row > strong { color: #718196; font-size: 7px; text-align: right; }
 
+.coverage-answer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  grid-column: 1 / -1;
+  margin: 0 0 7px 11px;
+}
+
+.coverage-answer {
+  align-items: center;
+  background: rgba(78, 212, 160, 0.055);
+  border: 1px solid rgba(78, 212, 160, 0.13);
+  border-radius: 9px;
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 7px 3px 3px;
+}
+
+.coverage-answer .pokemon-mark.small {
+  height: 34px;
+  width: 34px;
+}
+
+.coverage-answer .pokemon-mark.small::before {
+  height: 23px;
+  width: 23px;
+}
+
+.coverage-answer .pokemon-mark.small span { font-size: 9px; }
+
+.coverage-answer > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.coverage-answer > span b {
+  color: #b8d7cc;
+  font-size: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-answer > span small {
+  color: #668a7d;
+  font-size: 7px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card-intro {
   color: #74859a;
   font-size: 9px;

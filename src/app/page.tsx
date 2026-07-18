@@ -1993,8 +1993,8 @@ function BuilderView({
             <div className="panel analysis-card">
               <PanelHeader eyebrow="MATCHUP PROFILE" title="Coverage map" />
               {analysis ? <div className="coverage-columns">
-                <div><span className="analysis-label positive">EQUIPPED MOVE COVERAGE</span>{analysis.offense.map((row) => <CoverageRow key={row.type} {...row} />)}</div>
-                <div><span className="analysis-label danger">DEFENSIVE PRESSURE</span>{analysis.threats.map((row) => <CoverageRow key={row.type} {...row} danger />)}</div>
+                <div><span className="analysis-label positive">EQUIPPED MOVE COVERAGE</span>{analysis.offense.map((row) => <CoverageRow key={row.type} {...row} team={team} />)}</div>
+                <div><span className="analysis-label danger">DEFENSIVE PRESSURE</span>{analysis.threats.map((row) => <CoverageRow key={row.type} {...row} danger team={team} />)}</div>
               </div> : <div className="analysis-placeholder">{team.length === 3 ? "Loading current PvPoke analysis…" : "Complete a team of three to calculate its coverage."}</div>}
             </div>
             <div className="panel analysis-card targets-card">
@@ -2272,7 +2272,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.2 · Full-catalog roster upgrades</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.2.1 · Visual coverage answers</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
     </div>
   );
 }
@@ -2352,8 +2352,12 @@ function TeamScoreBreakdown({ analysis }: { analysis: TeamAnalysis }) {
   </div>;
 }
 
-function CoverageRow({ type, value, detail, danger = false }: { type: string; value: number; detail?: string; danger?: boolean }) {
-  return <div className={`coverage-row ${danger ? "danger" : ""}`}><span style={{ "--type": TYPE_COLORS[type] ?? "#8493a3" } as React.CSSProperties}><i />{type}<small>{detail}</small></span><b><i style={{ width: `${value}%` }} /></b><strong>{value}</strong></div>;
+function CoverageRow({ type, value, detail, answers = [], team, danger = false }: { type: string; value: number; detail?: string; answers?: Array<{ pokemonId: string; moveNames: string[] }>; team: Pokemon[]; danger?: boolean }) {
+  const answerPokemon = answers.flatMap((answer) => {
+    const pokemon = team.find((member) => member.id === answer.pokemonId);
+    return pokemon ? [{ pokemon, moveNames: answer.moveNames }] : [];
+  });
+  return <div className={`coverage-row ${danger ? "danger" : ""}`}><span style={{ "--type": TYPE_COLORS[type] ?? "#8493a3" } as React.CSSProperties}><i />{type}<small>{detail}</small></span><b><i style={{ width: `${value}%` }} /></b><strong>{value}</strong>{!danger && answerPokemon.length > 0 && <div className="coverage-answer-list" aria-label={`${type} coverage providers`}>{answerPokemon.map(({ pokemon, moveNames }) => <div className="coverage-answer" key={pokemon.id} title={`${pokemon.species}: ${moveNames.join(", ")}`}><PokemonMark pokemon={pokemon} size="small" /><span><b>{pokemon.species}</b><small>{moveNames.join(" · ")}</small></span></div>)}</div>}</div>;
 }
 
 function ProcessStep({ n, title, detail }: { n: string; title: string; detail: string }) {
