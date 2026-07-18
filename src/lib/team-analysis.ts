@@ -107,6 +107,22 @@ export type TeamRecommendationSet<T extends TeamPokemonInput> = {
   exact: boolean;
 };
 
+export type TeamAdditionRecommendation<T extends TeamPokemonInput> = {
+  pokemon: T;
+  team: T[];
+  analysis: TeamAnalysis;
+  role: TeamRoleAssignment;
+  scoreGain: number | null;
+};
+
+export type TeamAdditionRecommendationSet<T extends TeamPokemonInput> = {
+  additions: TeamAdditionRecommendation<T>[];
+  baselineScore: number | null;
+  candidateCount: number;
+  shortlistCount: number;
+  evaluatedCount: number;
+};
+
 const catalog = pvpokeCatalog as unknown as { moves: CatalogMove[]; pokemon: CatalogPokemon[] };
 const POKEMON_BY_ID = new Map(catalog.pokemon.map((pokemon) => [pokemon.id, pokemon]));
 const MOVES_BY_NAME = catalog.moves.reduce((moves, move) => {
@@ -545,5 +561,92 @@ export function recommendTeams<T extends TeamPokemonInput>(
     shortlistCount: searchPool.length + lockedMembers.length,
     evaluatedCount,
     exact: searchPool.length === available.length,
+  };
+}
+
+export function recommendTeamAdditions<T extends TeamPokemonInput>(
+  uploadedCandidates: T[],
+  missingCandidates: T[],
+  lockedIds: string[],
+  league: AnalysisLeague,
+  rankings: TeamRankingsData,
+  resultLimit = 6,
+): TeamAdditionRecommendationSet<T> {
+  const uploaded = uploadedCandidates.filter((pokemon) => !/_(mega|primal)(?:_|$)/.test(catalogPokemonForTeam(pokemon)?.id ?? ""));
+  const missing = missingCandidates.filter((pokemon) => !/_(mega|primal)(?:_|$)/.test(catalogPokemonForTeam(pokemon)?.id ?? ""));
+  const lockedMembers = lockedIds.map((id) => uploaded.find((pokemon) => pokemon.id === id)).filter(Boolean) as T[];
+  const availableUploaded = uploaded.filter((pokemon) => !lockedMembers.some((locked) => locked.id === pokemon.id));
+  const baseline = uploaded.length >= 3 ? recommendTeams(uploaded, lockedMembers.map((pokemon) => pokemon.id), league, rankings, 1).lineups[0] ?? null : null;
+  const empty: TeamAdditionRecommendationSet<T> = {
+    additions: [],
+    baselineScore: baseline?.analysis.score ?? null,
+    candidateCount: missing.length,
+    shortlistCount: 0,
+    evaluatedCount: 0,
+  };
+
+  const neededUploaded = 2 - lockedMembers.length;
+  if (neededUploaded < 0 || availableUploaded.length < neededUploaded || !missing.length) return empty;
+
+  const supportLimit = 30;
+  const supportPool = availableUploaded.length <= supportLimit
+    ? availableUploaded
+    : [...availableUploaded]
+      .map((pokemon) => {
+        const roles = pokemonRoleScores(pokemon, league, rankings);
+        return { pokemon, fit: Math.max(roles.lead, roles.safeSwitch, roles.closer) };
+      })
+      .sort((left, right) => right.fit - left.fit || pokemonMetaScore(right.pokemon, rankings, league) - pokemonMetaScore(left.pokemon, rankings, league))
+      .slice(0, supportLimit)
+      .map(({ pokemon }) => pokemon);
+
+  const additionLimit = 48;
+  const additionShortlist = missing
+    .map((pokemon) => {
+      const roles = pokemonRoleScores(pokemon, league, rankings);
+      const bestRoleFit = Math.max(roles.lead, roles.safeSwitch, roles.closer);
+      return { pokemon, acquisitionFit: pokemonMetaScore(pokemon, rankings, league) * 0.55 + bestRoleFit * 0.45 };
+    })
+    .sort((left, right) => right.acquisitionFit - left.acquisitionFit || left.pokemon.id.localeCompare(right.pokemon.id))
+    .slice(0, additionLimit)
+    .map(({ pokemon }) => pokemon);
+
+  let evaluatedCount = 0;
+  const additions: TeamAdditionRecommendation<T>[] = [];
+  for (const pokemon of additionShortlist) {
+    let best: { team: T[]; analysis: TeamAnalysis } | null = null;
+    visitCombinations(supportPool, neededUploaded, (support) => {
+      const team = [...lockedMembers, pokemon, ...support];
+      if (!isLegalOpenLeagueTeam(team)) return;
+      const analysis = analyzeTeam(team, league, rankings);
+      if (!analysis) return;
+      evaluatedCount += 1;
+      const candidate = { team, analysis };
+      if (!best || recommendationComparator(candidate, best) < 0) best = candidate;
+    });
+    if (!best) continue;
+    const selected = best as { team: T[]; analysis: TeamAnalysis };
+    const orderedTeam = selected.analysis.roles.map((assignment) => selected.team.find((member) => member.id === assignment.pokemonId)!).filter(Boolean);
+    const role = selected.analysis.roles.find((assignment) => assignment.pokemonId === pokemon.id)!;
+    additions.push({
+      pokemon,
+      team: orderedTeam,
+      analysis: selected.analysis,
+      role,
+      scoreGain: baseline ? selected.analysis.score - baseline.analysis.score : null,
+    });
+  }
+
+  additions.sort((left, right) => (right.scoreGain ?? -Infinity) - (left.scoreGain ?? -Infinity)
+    || right.analysis.score - left.analysis.score
+    || right.role.score - left.role.score
+    || left.pokemon.id.localeCompare(right.pokemon.id));
+
+  return {
+    additions: additions.slice(0, resultLimit),
+    baselineScore: baseline?.analysis.score ?? null,
+    candidateCount: missing.length,
+    shortlistCount: additionShortlist.length,
+    evaluatedCount,
   };
 }

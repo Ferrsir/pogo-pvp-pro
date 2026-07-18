@@ -1,6 +1,6 @@
 import catalog from "../src/data/pvpoke-catalog.json" with { type: "json" };
 import rankings from "../src/data/pvpoke-rankings.json" with { type: "json" };
-import { analyzeTeam, recommendTeams } from "../src/lib/team-analysis.ts";
+import { analyzeTeam, recommendTeamAdditions, recommendTeams } from "../src/lib/team-analysis.ts";
 
 const byId = new Map(catalog.pokemon.map((pokemon) => [pokemon.id, pokemon]));
 const league = "GL";
@@ -60,6 +60,18 @@ const repeatedRecommendations = recommendTeams(largeCandidates, [], league, rank
 if (recommendations.exact || recommendations.shortlistCount >= largeCandidates.length || recommendations.evaluatedCount > 12_000) throw new Error("Large-roster role screening did not stay within its deterministic search budget.");
 if (recommendations.lineups[0].team.map((pokemon) => pokemon.id).join("|") !== repeatedRecommendations.lineups[0].team.map((pokemon) => pokemon.id).join("|")) throw new Error("The same roster produced a different top recommendation.");
 
+const uploadedForAdditions = rankings.leagues[league].slice(0, 12).map(savedBuild);
+const missingForAdditions = rankings.leagues[league].slice(12, 36).map((ranking, index) => ({ ...savedBuild(ranking, index + 100), owned: false }));
+const additions = recommendTeamAdditions(uploadedForAdditions, missingForAdditions, [], league, rankings);
+if (!additions.additions.length || additions.candidateCount !== missingForAdditions.length || additions.evaluatedCount < 1) throw new Error("The roster-upgrade recommender did not evaluate missing catalog builds.");
+for (const addition of additions.additions) {
+  if (!addition.team.some((pokemon) => pokemon.id === addition.pokemon.id)) throw new Error("An upgrade recommendation is missing from its proposed lineup.");
+  if (addition.team.filter((pokemon) => pokemon.owned === false).length !== 1) throw new Error("A one-addition recommendation requires more than one missing Pokémon.");
+  if (!addition.analysis.roles.some((role) => role.pokemonId === addition.pokemon.id && role.role === addition.role.role)) throw new Error("An upgrade recommendation is missing its role assignment.");
+}
+if (additions.additions.some((addition, index) => index > 0 && (addition.scoreGain ?? -Infinity) > (additions.additions[index - 1].scoreGain ?? -Infinity))) throw new Error("Upgrade recommendations are not sorted by collection score gain.");
+
 console.log(`Validated ${analyses.length} distinct lineups: ${scores.size} scores, ${coverageMaps.size} coverage maps, ${threatMaps.size} threat maps.`);
 console.log(`Validated exhaustive recommendations across ${exactRecommendations.evaluatedCount} legal uploaded-roster combinations.`);
 console.log(`Validated deterministic large-roster screening across ${recommendations.evaluatedCount} finalist combinations.`);
+console.log(`Validated ${additions.additions.length} best-value additions across ${additions.evaluatedCount} uploaded-roster lineups.`);

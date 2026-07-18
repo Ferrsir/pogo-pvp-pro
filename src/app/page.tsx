@@ -20,7 +20,16 @@ import {
   inferPokemonLevel,
   scanAppraisalImage,
 } from "@/lib/appraisal-scan";
-import { analyzeTeam, pokemonMetaScore, recommendTeams, TeamAnalysis, TeamRecommendationSet } from "@/lib/team-analysis";
+import {
+  analyzeTeam,
+  pokemonMetaScore,
+  recommendTeamAdditions,
+  recommendTeams,
+  TeamAdditionRecommendation,
+  TeamAdditionRecommendationSet,
+  TeamAnalysis,
+  TeamRecommendationSet,
+} from "@/lib/team-analysis";
 
 type View = "dashboard" | "collection" | "builder" | "import" | "teams" | "settings";
 type League = "GL" | "UL" | "ML";
@@ -60,6 +69,7 @@ type Pokemon = {
   shadow?: boolean;
   elite?: boolean;
   owned?: boolean;
+  metaRank?: number;
 };
 
 type PokemonBuildDraft = {
@@ -712,6 +722,49 @@ const FUTURE_BUILDS: Pokemon[] = [
   },
 ];
 
+function createRankedCatalogBuilds(rankings: PvpRankingsData, league: League): Pokemon[] {
+  const cpCap = league === "GL" ? 1500 : league === "UL" ? 2500 : 10000;
+  const attackIv = league === "ML" ? 15 : 0;
+  const defenseIv = 15;
+  const hpIv = 15;
+
+  return rankings.leagues[league].flatMap((ranking) => {
+    const catalogPokemon = PVP_POKEMON_BY_ID.get(ranking.id);
+    if (!catalogPokemon) return [];
+    const target = findHighestLevelForCap(catalogPokemon.baseStats, attackIv, defenseIv, hpIv, cpCap);
+    const name = pokemonNameParts(catalogPokemon.name);
+    const chargedMoves = [
+      ranking.moveset[1] ?? catalogPokemon.chargedMoves[0] ?? "Not unlocked",
+      ranking.moveset[2] ?? catalogPokemon.chargedMoves[1] ?? "Not unlocked",
+    ];
+    return [{
+      id: `catalog-${league.toLowerCase()}-${catalogPokemon.id}`,
+      catalogId: catalogPokemon.id,
+      species: name.species,
+      form: name.form,
+      cp: target.cp,
+      level: target.level,
+      attackIv,
+      defenseIv,
+      hpIv,
+      fastMove: ranking.moveset[0] ?? catalogPokemon.fastMoves[0] ?? "",
+      chargedMoves,
+      recommendedMoves: ranking.moveset,
+      types: catalogPokemon.types,
+      rating: ranking.score,
+      rank: 1,
+      metaRank: ranking.rank,
+      role: "Acquisition target",
+      leagues: [league],
+      ready: true,
+      favorite: false,
+      shadow: catalogPokemon.tags.includes("shadow") || catalogPokemon.id.endsWith("_shadow"),
+      elite: ranking.moveset.some((move) => catalogPokemon.eliteMoves.includes(move)),
+      owned: false,
+    } satisfies Pokemon];
+  });
+}
+
 const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "dashboard", label: "Command Center", icon: "⌂" },
   { id: "collection", label: "My Collection", icon: "▦" },
@@ -834,24 +887,67 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const candidates = useMemo(() => {
-    const pool = ownedOnly ? collection : [...collection, ...FUTURE_BUILDS];
-    return pool
+  const uploadedCandidates = useMemo(() => collection
       .filter((pokemon) => pokemon.leagues.includes(league))
       .filter((pokemon) => includeShadow || !pokemon.shadow)
       .filter((pokemon) => allowElite || !pokemon.elite)
+      .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league)),
+    [allowElite, collection, includeShadow, league, rankingsData]);
+
+  const missingCatalogCandidates = useMemo(() => {
+    const uploadedCatalogIds = new Set(collection.map((pokemon) => catalogPokemonForRoster(pokemon)?.id).filter(Boolean));
+    const catalogBuilds = rankingsData ? createRankedCatalogBuilds(rankingsData, league) : FUTURE_BUILDS.filter((pokemon) => pokemon.leagues.includes(league));
+    return catalogBuilds
+      .filter((pokemon) => !uploadedCatalogIds.has(pokemon.catalogId))
+      .filter((pokemon) => includeShadow || !pokemon.shadow)
+      .filter((pokemon) => allowElite || !pokemon.elite)
       .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league));
-  }, [allowElite, collection, includeShadow, league, ownedOnly, rankingsData]);
+  }, [allowElite, collection, includeShadow, league, rankingsData]);
+
+  const candidates = useMemo(
+    () => ownedOnly ? uploadedCandidates : [...uploadedCandidates, ...missingCatalogCandidates]
+      .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league)),
+    [league, missingCatalogCandidates, ownedOnly, rankingsData, uploadedCandidates],
+  );
 
   const recommendationSet = useMemo<TeamRecommendationSet<Pokemon>>(() => {
     if (!rankingsData) return { lineups: [], candidateCount: candidates.length, shortlistCount: candidates.length, evaluatedCount: 0, exact: true };
     return recommendTeams(candidates, locked, league, rankingsData);
   }, [candidates, league, locked, rankingsData]);
-  const recommendationContext = `${league}|${ownedOnly}|${includeShadow}|${allowElite}|${locked.join(",")}|${candidates.map((pokemon) => [pokemon.id, pokemon.catalogId ?? "", pokemon.cp, pokemon.level, pokemon.fastMove, ...pokemon.chargedMoves, pokemon.rank].join(":")).join(";")}`;
+  const additionRecommendationSet = useMemo<TeamAdditionRecommendationSet<Pokemon>>(() => {
+    if (ownedOnly || !rankingsData) return { additions: [], baselineScore: null, candidateCount: missingCatalogCandidates.length, shortlistCount: 0, evaluatedCount: 0 };
+    return recommendTeamAdditions(uploadedCandidates, missingCatalogCandidates, locked, league, rankingsData);
+  }, [league, locked, missingCatalogCandidates, ownedOnly, rankingsData, uploadedCandidates]);
+  const recommendationContext = `${league}|${ownedOnly}|${includeShadow}|${allowElite}|${locked.join(",")}|${rankingsData?.source.commit ?? "loading"}|${missingCatalogCandidates.length}|${uploadedCandidates.map((pokemon) => [pokemon.id, pokemon.catalogId ?? "", pokemon.cp, pokemon.level, pokemon.fastMove, ...pokemon.chargedMoves, pokemon.rank].join(":")).join(";")}`;
   const recommendationIndex = recommendationSet.lineups.length && teamChoice.context === recommendationContext ? teamChoice.index % recommendationSet.lineups.length : 0;
   const activeRecommendation = recommendationSet.lineups[recommendationIndex] ?? null;
   const generatedTeam = activeRecommendation?.team ?? candidates.slice(0, 3);
   const generatedAnalysis = activeRecommendation?.analysis ?? analyzeTeam(generatedTeam, league, rankingsData);
+  const bestValueAdditions = useMemo<TeamAdditionRecommendation<Pokemon>[]>(() => {
+    if (ownedOnly) return [];
+    if (additionRecommendationSet.additions.length) return additionRecommendationSet.additions;
+    const byCatalog = new Map<string, TeamAdditionRecommendation<Pokemon>>();
+    for (const lineup of recommendationSet.lineups) {
+      for (const pokemon of lineup.team.filter((member) => member.owned === false)) {
+        const key = pokemon.catalogId ?? pokemon.id;
+        if (byCatalog.has(key)) continue;
+        const role = lineup.analysis.roles.find((assignment) => assignment.pokemonId === pokemon.id);
+        if (!role) continue;
+        byCatalog.set(key, {
+          pokemon,
+          team: lineup.team,
+          analysis: lineup.analysis,
+          role,
+          scoreGain: additionRecommendationSet.baselineScore === null ? null : lineup.analysis.score - additionRecommendationSet.baselineScore,
+        });
+      }
+    }
+    return [...byCatalog.values()]
+      .sort((left, right) => (right.scoreGain ?? -Infinity) - (left.scoreGain ?? -Infinity)
+        || right.analysis.score - left.analysis.score
+        || right.role.score - left.role.score)
+      .slice(0, 6);
+  }, [additionRecommendationSet, ownedOnly, recommendationSet.lineups]);
 
   const manualCandidates = useMemo(
     () => collection
@@ -897,6 +993,25 @@ function App() {
     setTeamChoice({ context: "", index: 0 });
   }
 
+  function changeOwnedOnly(next: boolean) {
+    setOwnedOnly(next);
+    setLocked([]);
+    setTeamChoice({ context: "", index: 0 });
+    setToast(next ? "Recommendations now use only your uploaded Pokémon." : "Screening the full PvPoke league catalog for teams and roster upgrades.");
+  }
+
+  function changeIncludeShadow(next: boolean) {
+    setIncludeShadow(next);
+    setLocked([]);
+    setTeamChoice({ context: "", index: 0 });
+  }
+
+  function changeAllowElite(next: boolean) {
+    setAllowElite(next);
+    setLocked([]);
+    setTeamChoice({ context: "", index: 0 });
+  }
+
   function toggleLock(id: string) {
     setLocked((current) => {
       if (current.includes(id)) return current.filter((item) => item !== id);
@@ -936,6 +1051,10 @@ function App() {
     }
     if (!builderAnalysis) {
       setToast("The live PvPoke analysis is still loading. Try saving again in a moment.");
+      return;
+    }
+    if (builderTeam.some((pokemon) => pokemon.owned === false)) {
+      setToast("Add the missing Pokémon to your collection before saving this lineup.");
       return;
     }
     const newTeam: SavedTeam = {
@@ -1269,11 +1388,14 @@ function App() {
               league={league}
               mode={builderMode}
               candidates={candidates}
+              lockCandidates={uploadedCandidates}
               manualCandidates={manualCandidates}
               manualTeamIds={manualTeamIds}
               team={builderTeam}
               analysis={builderAnalysis}
               recommendations={recommendationSet}
+              additionRecommendations={bestValueAdditions}
+              additionRecommendationSet={additionRecommendationSet}
               recommendationIndex={recommendationIndex}
               locked={locked}
               ownedOnly={ownedOnly}
@@ -1281,9 +1403,9 @@ function App() {
               allowElite={allowElite}
               onLeague={selectLeague}
               onMode={setBuilderMode}
-              onOwnedOnly={setOwnedOnly}
-              onIncludeShadow={setIncludeShadow}
-              onAllowElite={setAllowElite}
+              onOwnedOnly={changeOwnedOnly}
+              onIncludeShadow={changeIncludeShadow}
+              onAllowElite={changeAllowElite}
               onToggleLock={toggleLock}
               onToggleManual={toggleManualMember}
               onClearManual={() => setManualTeamIds([])}
@@ -1722,11 +1844,14 @@ function BuilderView({
   league,
   mode,
   candidates,
+  lockCandidates,
   manualCandidates,
   manualTeamIds,
   team,
   analysis,
   recommendations,
+  additionRecommendations,
+  additionRecommendationSet,
   recommendationIndex,
   locked,
   ownedOnly,
@@ -1746,11 +1871,14 @@ function BuilderView({
   league: League;
   mode: BuilderMode;
   candidates: Pokemon[];
+  lockCandidates: Pokemon[];
   manualCandidates: Pokemon[];
   manualTeamIds: string[];
   team: Pokemon[];
   analysis: TeamAnalysis | null;
   recommendations: TeamRecommendationSet<Pokemon>;
+  additionRecommendations: TeamAdditionRecommendation<Pokemon>[];
+  additionRecommendationSet: TeamAdditionRecommendationSet<Pokemon>;
   recommendationIndex: number;
   locked: string[];
   ownedOnly: boolean;
@@ -1768,7 +1896,8 @@ function BuilderView({
   onSave: () => void;
 }) {
   const roles = ["Lead", "Safe switch", "Closer"];
-  const candidatePool = mode === "manual" ? manualCandidates : candidates;
+  const candidatePool = mode === "manual" ? manualCandidates : lockCandidates;
+  const missingTeamMembers = team.filter((pokemon) => pokemon.owned === false).length;
   const sourceDate = analysis ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(analysis.sourceUpdatedAt)) : "";
   return (
     <>
@@ -1796,7 +1925,7 @@ function BuilderView({
             <>
               <PanelHeader eyebrow="TEAM RULES" title="Search settings" />
               <div className="control-stack">
-                <Switch label="Uploaded Pokémon only" detail="Find the best team in your collection" checked={ownedOnly} onChange={onOwnedOnly} />
+                <Switch label="Uploaded Pokémon only" detail={ownedOnly ? `Using ${candidates.length} eligible uploaded builds` : `Off · screening ${recommendations.candidateCount.toLocaleString()} PvPoke builds`} checked={ownedOnly} onChange={onOwnedOnly} />
                 <Switch label="Include Shadow forms" detail="Allow higher-pressure builds" checked={includeShadow} onChange={onIncludeShadow} />
                 <Switch label="Allow Elite TM moves" detail="Include legacy movesets" checked={allowElite} onChange={onAllowElite} />
               </div>
@@ -1837,9 +1966,28 @@ function BuilderView({
             ) : (
               <EmptyState icon="◇" title="Not enough eligible builds" text="Relax one of the team rules or import more Pokémon for this league." />
             )}
-            {team.length === 3 && <div className="lineup-actions"><p><span>✓</span> All three builds are legal for {LEAGUES[league].name}</p><button className="button secondary" onClick={onSave}>Save this team</button></div>}
+            {team.length === 3 && <div className="lineup-actions"><p><span>{missingTeamMembers ? "!" : "✓"}</span>{missingTeamMembers ? `${missingTeamMembers} recommended build${missingTeamMembers === 1 ? " is" : "s are"} not in your collection yet` : `All three builds are legal for ${LEAGUES[league].name}`}</p><button className="button secondary" disabled={missingTeamMembers > 0} onClick={onSave}>{missingTeamMembers ? "Add missing builds first" : "Save this team"}</button></div>}
             {mode === "manual" && team.length < 3 && <div className="manual-lineup-progress"><span>{team.length}/3</span><p>Select {3 - team.length} more Pokémon to complete this team.</p></div>}
           </section>
+
+          {mode === "smart" && !ownedOnly && <section className="panel acquisition-panel">
+            <PanelHeader eyebrow="ROSTER UPGRADES" title="Best-value Pokémon to add" />
+            <div className="acquisition-summary">
+              <p>{additionRecommendationSet.additions.length ? <>Each target was forced into a lineup with your uploaded Pokémon, then ranked by improvement over your best collection-only score{additionRecommendationSet.baselineScore === null ? "." : ` of ${additionRecommendationSet.baselineScore}.`}</> : <>These targets come from the strongest full-catalog lineups. Upload at least two eligible Pokémon to calculate one-addition score gains against your collection.</>}</p>
+              <span>SCREENED <b>{additionRecommendationSet.candidateCount.toLocaleString()}</b> MISSING BUILDS</span>
+            </div>
+            {additionRecommendations.length ? <div className="acquisition-grid">{additionRecommendations.map((addition, index) => {
+              const answeredTargets = addition.analysis.targets.filter((target) => target.answerPokemon === addition.pokemon.species).map((target) => target.name);
+              return <article className="acquisition-card" key={addition.pokemon.catalogId ?? addition.pokemon.id}>
+                <div className="acquisition-rank">#{index + 1}</div>
+                <PokemonMark pokemon={addition.pokemon} size="small" />
+                <div className="acquisition-copy"><span>{addition.role.role.toUpperCase()} · {addition.role.score} ROLE FIT</span><strong>{addition.pokemon.species}</strong><small>{addition.pokemon.form} · PvPoke meta #{addition.pokemon.metaRank?.toLocaleString() ?? "—"}</small></div>
+                <div className="acquisition-value"><strong>{addition.scoreGain === null ? addition.analysis.score : `${addition.scoreGain >= 0 ? "+" : ""}${addition.scoreGain}`}</strong><span>{addition.scoreGain === null ? "TEAM SCORE" : "SCORE GAIN"}</span></div>
+                <p><b>Best lineup:</b> {addition.team.map((pokemon) => pokemon.species).join(" · ")}</p>
+                <p><b>Why it helps:</b> {answeredTargets.length ? `Best answer into ${answeredTargets.join(" and ")}.` : addition.role.reason} Remaining checks: {addition.analysis.metaThreats.slice(0, 2).map((target) => target.name).join(" and ")}.</p>
+              </article>;
+            })}</div> : <EmptyState icon="+" title="No legal additions found" text="Relax the Shadow or Elite TM filters, or upload more Pokémon for this league." />}
+          </section>}
 
           <section className="analysis-grid">
             <div className="panel analysis-card">
@@ -1861,7 +2009,7 @@ function BuilderView({
           </section>
 
           <section className="panel lock-panel">
-            <PanelHeader eyebrow={mode === "manual" ? "YOUR COLLECTION" : "BUILD AROUND YOUR FAVORITES"} title={mode === "manual" ? `Choose exactly three · ${manualTeamIds.length}/3 selected` : `Lock up to two · ${locked.length}/2 selected`} action={mode === "manual" ? (manualTeamIds.length ? <button className="text-button" onClick={onClearManual}>Clear team</button> : undefined) : (locked.length ? <button className="text-button" onClick={() => locked.forEach(onToggleLock)}>Clear locks</button> : undefined)} />
+            <PanelHeader eyebrow={mode === "manual" ? "YOUR COLLECTION" : "BUILD AROUND YOUR UPLOADS"} title={mode === "manual" ? `Choose exactly three · ${manualTeamIds.length}/3 selected` : `Lock an uploaded core · ${locked.length}/2 selected`} action={mode === "manual" ? (manualTeamIds.length ? <button className="text-button" onClick={onClearManual}>Clear team</button> : undefined) : (locked.length ? <button className="text-button" onClick={() => locked.forEach(onToggleLock)}>Clear locks</button> : undefined)} />
             {candidatePool.length ? <div className="candidate-scroll">
               {candidatePool.map((pokemon) => {
                 const selected = mode === "manual" ? manualTeamIds.includes(pokemon.id) : locked.includes(pokemon.id);
@@ -2124,7 +2272,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.1 · Ranked team recommendations</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.2 · Full-catalog roster upgrades</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
     </div>
   );
 }
@@ -2146,8 +2294,9 @@ function MiniMember({ pokemon, role, index }: { pokemon: Pokemon; role: string; 
 }
 
 function MemberCard({ pokemon, role, roleReason, league, locked, manual = false, onLock }: { pokemon: Pokemon; role: string; roleReason?: string; league: League; locked: boolean; manual?: boolean; onLock: () => void }) {
-  const rank = pokemonPvpIvRank(pokemon, league);
-  return <article className={`member-card ${manual ? "manual" : ""}`}><div className="member-card-top"><span className="role-label">{role.toUpperCase()}</span><button className={manual ? "remove" : locked ? "locked" : ""} onClick={onLock}>{manual ? "× REMOVE" : locked ? "◆ LOCKED" : "◇ LOCK"}</button></div><PokemonMark pokemon={pokemon} size="large" /><h3>{pokemon.species}</h3><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Lv {pokemon.level}</p>{roleReason && <div className="role-fit"><span>WHY THIS ROLE</span><strong>{roleReason}</strong></div>}<TypeList types={pokemon.types} /><div className="move-list"><div><span>FAST</span><strong>{pokemon.fastMove}</strong></div>{pokemon.chargedMoves.map((move, index) => <div key={move}><span>CHG {index + 1}</span><strong>{move}</strong></div>)}</div><div className="member-meta"><span>IV <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><span>Rank <b>#{rank?.toLocaleString() ?? "—"}</b></span>{!pokemon.owned && <em>NOT OWNED</em>}</div></article>;
+  const missing = pokemon.owned === false;
+  const rank = missing ? null : pokemonPvpIvRank(pokemon, league);
+  return <article className={`member-card ${manual ? "manual" : ""} ${missing ? "acquisition-target" : ""}`}><div className="member-card-top"><span className="role-label">{role.toUpperCase()}</span><button className={manual ? "remove" : locked ? "locked" : ""} disabled={missing} onClick={onLock}>{missing ? "ROSTER TARGET" : manual ? "× REMOVE" : locked ? "◆ LOCKED" : "◇ LOCK"}</button></div><PokemonMark pokemon={pokemon} size="large" /><h3>{pokemon.species}</h3><p>{pokemon.form} · CP {pokemon.cp.toLocaleString()} · Lv {pokemon.level}</p>{roleReason && <div className="role-fit"><span>WHY THIS ROLE</span><strong>{roleReason}</strong></div>}<TypeList types={pokemon.types} /><div className="move-list"><div><span>FAST</span><strong>{pokemon.fastMove}</strong></div>{pokemon.chargedMoves.map((move, index) => <div key={move}><span>CHG {index + 1}</span><strong>{move}</strong></div>)}</div><div className="member-meta">{missing ? <><span>PVPOKE <b>#{pokemon.metaRank?.toLocaleString() ?? "—"}</b></span><span>TARGET <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><em>NOT UPLOADED</em></> : <><span>IV <b>{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</b></span><span>Rank <b>#{rank?.toLocaleString() ?? "—"}</b></span></>}</div></article>;
 }
 
 function PokemonGoLogo({ size = "brand" }: { size?: "small" | "brand" | "hero" }) {
