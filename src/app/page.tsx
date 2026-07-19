@@ -412,6 +412,22 @@ function primaryLeagueForPokemon(pokemon: Pokemon): League {
   return pokemon.leagues[0] ?? (pokemon.cp <= 1500 ? "GL" : pokemon.cp <= 2500 ? "UL" : "ML");
 }
 
+function pokemonBattleReady(pokemon: Pokemon, rankings: PvpRankingsData | null, league = primaryLeagueForPokemon(pokemon)) {
+  if (!rankings) return pokemon.ready;
+  const catalogPokemon = catalogPokemonForRoster(pokemon);
+  const ranking = catalogPokemon ? rankings.leagues[league].find((entry) => entry.id === catalogPokemon.id) ?? null : null;
+  if (!catalogPokemon || !ranking) return false;
+  const cpCap = league === "GL" ? 1500 : league === "UL" ? 2500 : 10000;
+  if (pokemon.cp > cpCap) return false;
+  const target = findHighestLevelForCap(catalogPokemon.baseStats, pokemon.attackIv, pokemon.defenseIv, pokemon.hpIv, cpCap);
+  const currentChargedMoves = pokemon.chargedMoves.filter((move) => move && move !== "Not unlocked" && move !== "Select move");
+  const movesReady = pokemon.fastMove === ranking.moveset[0]
+    && ranking.moveset.slice(1).every((move) => currentChargedMoves.includes(move))
+    && currentChargedMoves.length >= 2;
+  const levelReady = Math.max(0, Math.round((target.level - pokemon.level) * 2)) === 0;
+  return movesReady && levelReady;
+}
+
 function pokemonPvpIvRank(pokemon: Pokemon, league = primaryLeagueForPokemon(pokemon)) {
   const catalogPokemon = catalogPokemonForRoster(pokemon);
   if (!catalogPokemon) return pokemon.rank || null;
@@ -887,12 +903,17 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const uploadedCandidates = useMemo(() => collection
+  const analyzedCollection = useMemo(() => collection.map((pokemon) => {
+    const ready = pokemonBattleReady(pokemon, rankingsData);
+    return ready === pokemon.ready ? pokemon : { ...pokemon, ready };
+  }), [collection, rankingsData]);
+
+  const uploadedCandidates = useMemo(() => analyzedCollection
       .filter((pokemon) => pokemon.leagues.includes(league))
       .filter((pokemon) => includeShadow || !pokemon.shadow)
       .filter((pokemon) => allowElite || !pokemon.elite)
       .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league)),
-    [allowElite, collection, includeShadow, league, rankingsData]);
+    [allowElite, analyzedCollection, includeShadow, league, rankingsData]);
 
   const missingCatalogCandidates = useMemo(() => {
     const uploadedCatalogIds = new Set(collection.map((pokemon) => catalogPokemonForRoster(pokemon)?.id).filter(Boolean));
@@ -950,10 +971,10 @@ function App() {
   }, [additionRecommendationSet, ownedOnly, recommendationSet.lineups]);
 
   const manualCandidates = useMemo(
-    () => collection
+    () => analyzedCollection
       .filter((pokemon) => pokemon.leagues.includes(league))
       .sort((a, b) => pokemonMetaScore(b, rankingsData, league) - pokemonMetaScore(a, rankingsData, league)),
-    [collection, league, rankingsData],
+    [analyzedCollection, league, rankingsData],
   );
 
   const manualTeam = useMemo(
@@ -969,15 +990,15 @@ function App() {
 
   const filteredCollection = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return collection.filter((pokemon) => {
+    return analyzedCollection.filter((pokemon) => {
       const matchesQuery = !normalized || `${pokemon.species} ${pokemon.form} ${pokemon.types.join(" ")}`.toLowerCase().includes(normalized);
       const matchesLeague = collectionLeague === "ALL" || pokemon.leagues.includes(collectionLeague);
       return matchesQuery && matchesLeague;
     });
-  }, [collection, collectionLeague, query]);
+  }, [analyzedCollection, collectionLeague, query]);
 
-  const readyCount = collection.filter((pokemon) => pokemon.ready).length;
-  const leagueReady = collection.filter((pokemon) => pokemon.leagues.includes(league) && pokemon.ready).length;
+  const readyCount = analyzedCollection.filter((pokemon) => pokemon.ready).length;
+  const leagueReady = analyzedCollection.filter((pokemon) => pokemon.leagues.includes(league) && pokemonBattleReady(pokemon, rankingsData, league)).length;
   const activeLeague = LEAGUES[league];
   const selectedPokemon = selectedPokemonId ? collection.find((pokemon) => pokemon.id === selectedPokemonId) ?? null : null;
 
@@ -1359,7 +1380,7 @@ function App() {
         <div className="page-content">
           {view === "dashboard" && (
             <Dashboard
-              collection={collection}
+              collection={analyzedCollection}
               league={league}
               team={generatedTeam}
               analysis={generatedAnalysis}
@@ -1605,7 +1626,7 @@ function CollectionView({
                 const rank = pokemonPvpIvRank(pokemon);
                 return (
                 <tr className="clickable-pokemon-row" key={pokemon.id} onClick={() => onSelect(pokemon.id)}>
-                  <td><button type="button" className="pokemon-cell pokemon-detail-trigger" onClick={(event) => { event.stopPropagation(); onSelect(pokemon.id); }} aria-label={`View all details for ${pokemon.species}`}><PokemonMark pokemon={pokemon} size="small" /><span><strong>{pokemon.species}</strong><small>{pokemon.form}</small></span><i aria-hidden="true">→</i></button></td>
+                  <td><button type="button" className="pokemon-cell pokemon-detail-trigger" onClick={(event) => { event.stopPropagation(); onSelect(pokemon.id); }} aria-label={`View all details for ${pokemon.species}`}><PokemonMark pokemon={pokemon} size="small" /><span className="pokemon-cell-copy"><strong>{pokemon.species}</strong><small>{pokemon.form}</small></span><i aria-hidden="true">→</i></button></td>
                   <td><div className="league-pills">{pokemon.leagues.map((item) => <span key={item} className={`league-pill ${item.toLowerCase()}`}>{item}</span>)}</div></td>
                   <td><strong className="numeric">{pokemon.cp.toLocaleString()}</strong><span className="table-sub">Level {pokemon.level}</span></td>
                   <td><strong className="numeric">{pokemon.attackIv}/{pokemon.defenseIv}/{pokemon.hpIv}</strong><span className="table-sub">Rank #{rank?.toLocaleString() ?? "—"}</span></td>
@@ -1675,9 +1696,7 @@ function PokemonDetailDrawer({ pokemon, onSave, onClose }: { pokemon: Pokemon; o
   const missingRecommendedMoves = recommendedMoves.slice(1).filter((move) => !currentChargedMoves.includes(move));
   const fastMoveReady = !recommendedMoves[0] || pokemon.fastMove === recommendedMoves[0];
   const secondMoveReady = currentChargedMoves.length >= 2;
-  const movesReady = Boolean(ranking && fastMoveReady && missingRecommendedMoves.length === 0 && secondMoveReady);
-  const levelReady = Boolean(ivAnalysis && ivAnalysis.powerUps === 0 && pokemon.cp <= leagueCpCap);
-  const buildReady = movesReady && levelReady;
+  const buildReady = pokemonBattleReady(pokemon, rankings, detailLeague);
   const ivPercent = Math.round(((pokemon.attackIv + pokemon.defenseIv + pokemon.hpIv) / 45) * 100);
   const sourceDate = rankings ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(rankings.source.sourceUpdatedAt)) : "";
   const pvpokeUrl = catalogPokemon ? `https://pvpoke.com/rankings/all/${leagueCpCap}/overall/${catalogPokemon.id}/` : "https://pvpoke.com/rankings/";
@@ -1741,19 +1760,20 @@ function PokemonDetailDrawer({ pokemon, onSave, onClose }: { pokemon: Pokemon; o
     const chargedMoves = [draft.chargedMove1, draft.chargedMove2 || "Not unlocked"];
     const equippedMoves = [draft.fastMove, ...chargedMoves];
     const nextLeague: League = draft.cp <= 1500 ? "GL" : draft.cp <= 2500 ? "UL" : "ML";
-    const recommendedReady = pokemon.recommendedMoves.length
-      ? pokemon.recommendedMoves.every((move) => equippedMoves.includes(move)) && Boolean(draft.chargedMove2)
-      : pokemon.ready && Boolean(draft.chargedMove2);
-    onSave({
+    const nextPokemon: Pokemon = {
       ...pokemon,
       cp: draft.cp,
       level: draft.level,
       fastMove: draft.fastMove,
       chargedMoves,
       leagues: [nextLeague],
-      ready: recommendedReady,
+      ready: pokemon.recommendedMoves.length
+        ? pokemon.recommendedMoves.every((move) => equippedMoves.includes(move)) && Boolean(draft.chargedMove2)
+        : pokemon.ready && Boolean(draft.chargedMove2),
       elite: equippedMoves.some((move) => catalogPokemon.eliteMoves.includes(move)),
-    });
+    };
+    nextPokemon.ready = pokemonBattleReady(nextPokemon, rankings, nextLeague);
+    onSave(nextPokemon);
     setDetailLeague(nextLeague);
     setEditError("");
     setEditing(false);
@@ -2272,7 +2292,7 @@ function SettingsView({ user, compactMode, keepScreenshots, onCompactMode, onKee
       <section className="panel settings-panel"><PanelHeader eyebrow="DISPLAY" title="Workspace preferences" /><Switch label="Compact roster density" detail="Fit more rows on desktop" checked={compactMode} onChange={onCompactMode} /><Switch label="Keep imported screenshots" detail="Store compressed copies on this device" checked={keepScreenshots} onChange={onKeepScreenshots} /></section>
       <section className="panel settings-panel profile-settings"><PanelHeader eyebrow="TRAINER PROFILE" title="Account details" /><form className="profile-form" onSubmit={saveProfile}><label className="auth-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" required /></label><div className="profile-form-grid"><label className="auth-field"><span>Team</span><select value={team} onChange={(event) => setTeam(event.target.value as TrainerTeam)}>{TRAINER_TEAMS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="auth-field"><span>Trainer level</span><input type="number" value={trainerLevel} onChange={(event) => setTrainerLevel(Number(event.target.value))} min={1} max={80} required /></label></div>{error && <div className="auth-error" role="alert"><span>!</span>{error}</div>}<button className="button primary" disabled={saving}>{saving ? "Saving…" : "Save profile"}</button></form></section>
       <section className="panel settings-panel"><PanelHeader eyebrow="ACCOUNT DATA" title="Private cloud workspace" /><div className="demo-notice connected"><span>✓</span><p><strong>Database sync is connected.</strong>Your roster and saved teams belong to this account and follow you between signed-in devices.</p></div><button className="button danger" onClick={onReset}>Delete roster & teams</button></section>
-      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.2.2 · Visual defensive pressure</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
+      <section className="panel settings-panel full"><PanelHeader eyebrow="DATA & ATTRIBUTION" title="Built for transparent team planning" /><div className="settings-copy"><p>Species, forms, base stats, types, legal moves, and roster battle files are pinned to attributed PvPoke data. Team recommendations deterministically test legal combinations, assign battle roles, and rank each lineup by meta strength, coverage, safety, and the exact saved builds. Pokémon artwork is loaded from a pinned PokeAPI sprite catalog.</p><div><span>APP VERSION</span><strong>1.2.3 · Unified build readiness</strong></div><div><span>CLOUD DATABASE</span><strong>Connected</strong></div><div><span>PVPOKE CATALOG</span><strong>{pvpokeCatalog.source.pokemonCount.toLocaleString("en-US")} released forms</strong></div><div><span>POKEAPI ARTWORK</span><strong>{pokeapiSprites.source.exactFormEntries.toLocaleString("en-US")} form-specific images</strong></div></div></section>
     </div>
   );
 }

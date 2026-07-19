@@ -1380,10 +1380,11 @@ button:disabled {
   width: 100%;
 }
 
-.pokemon-detail-trigger > span {
+.pokemon-detail-trigger > .pokemon-cell-copy {
   display: flex;
   flex: 1;
   flex-direction: column;
+  margin-top: 0;
 }
 
 .pokemon-detail-trigger small {
