@@ -76,6 +76,8 @@ export type TeamCoverageRow = {
     pokemonId: string;
     moveNames: string[];
   }>;
+  weakPokemonIds?: string[];
+  resistPokemonIds?: string[];
 };
 
 export type TeamMetaTarget = {
@@ -406,13 +408,15 @@ export function analyzeTeam(
     const multipliers = memberData.map((member) => effectiveness(attackType, member.types));
     const weakMembers = multipliers.map((multiplier, index) => ({ multiplier, index })).filter((item) => item.multiplier > 1.01);
     const resistMembers = multipliers.filter((multiplier) => multiplier < 0.99).length;
+    const weakPokemonIds = weakMembers.map((member) => memberData[member.index].pokemon.id);
+    const resistPokemonIds = multipliers.flatMap((multiplier, index) => multiplier < 0.99 ? [memberData[index].pokemon.id] : []);
     weaknessSlots += weakMembers.length;
     for (const weakMember of weakMembers) {
       if (multipliers.some((multiplier, index) => index !== weakMember.index && multiplier < 0.99)) protectedWeaknessSlots += 1;
     }
     if (weakMembers.length >= 2) sharedWeaknesses += 1;
     const value = clamp(18 + weakMembers.length * 27 - resistMembers * 12 + (weakMembers.length >= 2 ? 14 : 0), 5, 98);
-    return { type: attackType, value: Math.round(value), detail: weakMembers.length ? `${weakMembers.length} weak · ${resistMembers} resist` : resistMembers ? `${resistMembers} resist` : "neutral" };
+    return { type: attackType, value: Math.round(value), detail: weakMembers.length ? `${weakMembers.length} weak · ${resistMembers} resist` : resistMembers ? `${resistMembers} resist` : "neutral", weakPokemonIds, resistPokemonIds };
   }).sort((left, right) => right.value - left.value || left.type.localeCompare(right.type));
 
   const protectionRate = weaknessSlots ? protectedWeaknessSlots / weaknessSlots : 1;

@@ -43,6 +43,13 @@ const analyses = [0, 3, 6, 9].map((start) => {
       if (!team.some((pokemon) => pokemon.id === answer.pokemonId) || !answer.moveNames.length) throw new Error(`Coverage for ${coverage.type} points to an invalid team answer.`);
     }
   }
+  for (const pressure of analysis.threats) {
+    for (const pokemonId of [...(pressure.weakPokemonIds ?? []), ...(pressure.resistPokemonIds ?? [])]) {
+      if (!team.some((pokemon) => pokemon.id === pokemonId)) throw new Error(`Defensive pressure for ${pressure.type} points to a Pokémon outside the active team.`);
+    }
+    if (/[1-9]\d* weak/.test(pressure.detail) && !pressure.weakPokemonIds?.length) throw new Error(`Defensive pressure for ${pressure.type} is missing its weak Pokémon.`);
+    if (/[1-9]\d* resist/.test(pressure.detail) && !pressure.resistPokemonIds?.length) throw new Error(`Defensive pressure for ${pressure.type} is missing its resisting Pokémon.`);
+  }
   return analysis;
 });
 

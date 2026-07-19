@@ -2944,6 +2944,25 @@ button:disabled {
   white-space: nowrap;
 }
 
+.coverage-answer-list.defensive {
+  margin-left: 11px;
+}
+
+.coverage-answer.weakness {
+  background: rgba(255, 104, 116, 0.055);
+  border-color: rgba(255, 104, 116, 0.16);
+}
+
+.coverage-answer.weakness > span b { color: #dfb0b6; }
+.coverage-answer.weakness > span small { color: #d5727e; }
+
+.coverage-answer.resistance {
+  background: rgba(78, 212, 160, 0.055);
+  border-color: rgba(78, 212, 160, 0.13);
+}
+
+.coverage-answer.resistance > span small { color: #65a98e; }
+
 .card-intro {
   color: #74859a;
   font-size: 9px;

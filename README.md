@@ -19,6 +19,7 @@ Pogo PVP Pro is a polished Pokémon GO PvP workspace with private trainer accoun
 - Interactive team builder with a working uploaded-only/full-PvPoke-catalog scope plus Shadow and Elite TM controls
 - Best-value roster additions ranked by their score gain with your uploaded core, recommended role, lineup, matchup value, and remaining counters
 - Coverage rows show the active-team Pokémon and equipped moves providing each super-effective answer
+- Defensive-pressure rows identify the exact teammates that are weak to or resist each incoming attack type
 - Manual team mode for choosing an exact Lead, Safe switch, and Closer from your collection
 - Lock up to two Pokémon and generate alternate lineups
 - Deterministic #1 recommendation from every legal combination in normal-sized uploaded rosters, with ranked next-best alternatives
